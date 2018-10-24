@@ -1,3 +1,6 @@
+# 本文件用于创建MySQL数据库
+# 季俊男
+
 import pymysql
 import win32com.client as win32
 import pywintypes
@@ -7,6 +10,7 @@ import datetime as dtt
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+import scipy.optimize as optimize
 import os, sys
 
 
@@ -30,6 +34,31 @@ class Data(object):
 
     def select_col(self, col):
         return [d[col] for d in self.data]
+
+
+class BondYTM(object):
+    """本类用于计算续发固定利率附息国债到期收益率"""
+    def __init__(self, terms, rate, dt0, par=100, freq=1):
+        """类初始化函数，terms代表债券年限，rate表示发行利率，dt0表示发行日期，par表示债券面值，默认100
+        freq表示一年附息频次，默认为1"""
+        self.terms = terms
+        self.rate = rate
+        self.dt0 = dt0
+        self.par = par
+        self.freq = freq
+
+    def get_ts(self, dt:dtt.date):
+        dt_delta_days = (dt - self.dt0).days
+        year_days = 365
+        t0 = round(dt_delta_days * self.freq / year_days, 2)
+        ts = [i+1-t0 for i in range(self.terms*self.freq)]
+        return ts
+
+    def bond_ytm(self, dt, price, guess=0.03):
+        ts = self.get_ts(dt)
+        coup = self.par * self.rate / self.freq
+        ytm_func = lambda y: sum([coup/(1+y/self.freq)**t for t in ts])+self.par/(1+y/self.freq)**ts[-1]-price
+        return optimize.newton(ytm_func, guess)
 
 
 class ReadExcel(object):
@@ -212,7 +241,7 @@ def main():
 if __name__ == "__main__":
     w.start()
     db = pymysql.connect("localhost", "root", "root", "myreport1", charset="utf8")
-    create_db(db)
+    # create_db(db)
     # figures(db)
-    db.close()
-    print(sys.path[0])
+    # db.close()
+    # print(sys.path[0])
