@@ -58,6 +58,11 @@ class BondYTM(object):
         ts = self.get_ts(dt)
         coup = self.par * self.rate / self.freq
         ytm_func = lambda y: sum([coup/(1+y/self.freq)**t for t in ts])+self.par/(1+y/self.freq)**ts[-1]-price
+        fprime = lambda y: sum([-t * coup / self.freq * (1 + y / self.freq) ** (t + 1) \
+                                for t in ts]) - ts[-1] * self.par / self.freq * (1 + y / self.freq) ** (ts[-1] + 1)
+        fprime2 = lambda y: sum([(t + 1) * t * coup / self.freq ** 2 * (1 + y / self.freq) ** (t + 2) for t in ts])\
+                            + (ts[-1] + 1) * ts[-1] * self.par / self.freq ** 2 * (1 + y / self.freq) ** (ts[-1] + 2)
+        # return optimize.fsolve(ytm_func, 0.03, fprime=fprime)
         return optimize.newton(ytm_func, guess)
 
 
