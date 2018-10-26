@@ -51,19 +51,20 @@ class BondYTM(object):
         dt_delta_days = (dt - self.dt0).days
         year_days = 365
         t0 = round(dt_delta_days * self.freq / year_days, 2)
-        ts = [i+1-t0 for i in range(self.terms*self.freq)]
-        return ts
+        ts = [i for i in range(self.terms*self.freq)]
+        return t0, ts
 
     def bond_ytm(self, dt, price, guess=0.03):
-        ts = self.get_ts(dt)
+        t0, ts = self.get_ts(dt)
         coup = self.par * self.rate / self.freq
-        ytm_func = lambda y: sum([coup/(1+y/self.freq)**t for t in ts])+self.par/(1+y/self.freq)**ts[-1]-price
-        fprime = lambda y: sum([-t * coup / self.freq * (1 + y / self.freq) ** (t + 1) \
-                                for t in ts]) - ts[-1] * self.par / self.freq * (1 + y / self.freq) ** (ts[-1] + 1)
-        fprime2 = lambda y: sum([(t + 1) * t * coup / self.freq ** 2 * (1 + y / self.freq) ** (t + 2) for t in ts])\
-                            + (ts[-1] + 1) * ts[-1] * self.par / self.freq ** 2 * (1 + y / self.freq) ** (ts[-1] + 2)
-        # return optimize.fsolve(ytm_func, 0.03, fprime=fprime)
-        return optimize.newton(ytm_func, guess)
+        ytm_func = lambda y: (sum([coup / (1 + y / self.freq) ** t for t in ts]) + self.par / (1 + y / self.freq) **
+                              ts[-1]) / (1 + t0 * y / self.freq) - price
+        fprime = lambda y: (sum([-t * coup / self.freq * (1 + y / self.freq) ** (t + 1) for t in ts]) - ts[
+            -1] * self.par / self.freq * (1 + y / self.freq) ** (ts[-1] + 1)) / (
+                                       1 + t0 * y / self.freq) - t0 / self.freq * (1 + t0 * y / self.freq) ** (-2) * (
+                                       sum([coup / (1 + y / self.freq) ** t for t in ts]) + self.par / (
+                                           1 + y / self.freq) ** ts[-1])
+        return optimize.newton(ytm_func, 0.03, fprime=fprime)
 
 
 class ReadExcel(object):
