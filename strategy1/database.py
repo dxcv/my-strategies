@@ -13,6 +13,26 @@ import numpy as np
 import scipy.optimize as optimize
 import os, sys
 
+data_path = r"f:\reports\my report\report1\数据" # excel数据文件存放路径
+
+
+def create_database(cur):
+    """本函数用于创建数据库与表"""
+    _ = cur.execute("create database if not exists strategy1 character set UTF8")
+    _ = cur.execute("use strategy1")
+    sql_tb_pri = """
+    create table if not exists tb_pri(
+    `dt` date NOT NULL COMMENT '发行日期',
+    `code` char(15) NOT NULL PRIMARY KEY COMMENT '债券代码',
+    `name` char(15) NOT NULL COMMENT '债券名称',
+    `rate` float(6, 4) NOT NULL COMMENT '中标利率',
+    `mg_rate` float(6, 4) DEFAULT NULL COMMENT '边际中标利率',
+    `multiplier` float(6, 4) NOT NULL COMMENT '中标倍数',
+    `mg_multiplier` float(6, 4) DEFAULT NULL COMMENT '边际中标倍数',
+    `bondtype` char(15) NOT NULL COMMENT '债券类型')
+    """
+    cur.execute(sql_tb_pri)
+
 
 class Data(object):
     """本类用于从mysql中提取相应条件的数据"""
@@ -70,7 +90,7 @@ class BondYTM(object):
 class ReadExcel(object):
     """本类用于从Excel表格中读取数据"""
     def __init__(self, bondtype, year, xlapp):
-        self.filename = r"D:\myreport1\利率债一级市场与二级市场关系研究\data\债券招投标结果（{}{}）.xlsx".format(bondtype, year)
+        self.filename = data_path + r"\债券招投标结果（{}{}）.xlsx".format(bondtype, year)
         self.xlapp = xlapp
         self.wb = xlapp.Workbooks.Open(self.filename)
         self.ws = self.wb.Worksheets(1)
