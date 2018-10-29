@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import scipy.optimize as optimize
+import re
 import os, sys
 
 data_path = r"f:\reports\my report\report1\数据" # excel数据文件存放路径
@@ -25,13 +26,14 @@ def create_database(cur):
     `dt` date NOT NULL COMMENT '发行日期',
     `code` char(15) NOT NULL PRIMARY KEY COMMENT '债券代码',
     `name` char(15) NOT NULL COMMENT '债券名称',
+    `term` int NOT NULL COMMENT '债券期限',
     `rate` float(6, 4) NOT NULL COMMENT '中标利率',
     `mg_rate` float(6, 4) DEFAULT NULL COMMENT '边际中标利率',
     `multiplier` float(6, 4) NOT NULL COMMENT '中标倍数',
     `mg_multiplier` float(6, 4) DEFAULT NULL COMMENT '边际中标倍数',
     `bondtype` char(15) NOT NULL COMMENT '债券类型')
     """
-    cur.execute(sql_tb_pri)
+    _ = cur.execute(sql_tb_pri)
 
 
 class Data(object):
@@ -90,17 +92,28 @@ class BondYTM(object):
 class ReadExcel(object):
     """本类用于从Excel表格中读取数据"""
     def __init__(self, bondtype, year, xlapp):
-        self.filename = data_path + r"\债券招投标结果（{}{}）.xlsx".format(bondtype, year)
+        self.bondtype = bondtype
+        if bondtype in ["国开债", "国债"]:
+            self.filename = data_path + r"\债券招投标结果（{}{}）.xlsx".format(bondtype, year)
+        elif bondtype == "利率债发行":
+            self.filename = data_path + r"\利率债发行-{}.xlsx".format(year)
         self.xlapp = xlapp
         self.wb = xlapp.Workbooks.Open(self.filename)
         self.ws = self.wb.Worksheets(1)
-        self.row_num = self.ws.UsedRange.Rows.Count-2
-        self.col_num = 31
 
     def extract(self):
-        data = self.ws.Range(self.ws.Cells(2, 1), self.ws.Cells(self.row_num, 31)).Value
-        self.wb.Close()
-        return data
+        if self.bondtype in ["国债", "国开债"]:
+            pass
+        elif self.bondtype == "利率债":
+            pass
+
+    def __data1(self):
+        pass
+
+    def __data2(self):
+        pass
+
+
 
 
 class Excel2DB(object):
