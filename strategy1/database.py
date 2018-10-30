@@ -27,13 +27,31 @@ def create_database(cur):
     `code` char(15) NOT NULL PRIMARY KEY COMMENT '债券代码',
     `name` char(15) NOT NULL COMMENT '债券名称',
     `term` int NOT NULL COMMENT '债券期限',
-    `rate` float(6, 4) NOT NULL COMMENT '中标利率',
-    `mg_rate` float(6, 4) DEFAULT NULL COMMENT '边际中标利率',
-    `multiplier` float(6, 4) NOT NULL COMMENT '中标倍数',
-    `mg_multiplier` float(6, 4) DEFAULT NULL COMMENT '边际中标倍数',
-    `bondtype` char(15) NOT NULL COMMENT '债券类型')
+    `rate` float(6, 4) COMMENT '中标利率',
+    `mg_rate` float(7, 4) DEFAULT NULL COMMENT '边际中标利率',
+    `multiplier` float(4, 2) NOT NULL COMMENT '中标倍数',
+    `mg_multiplier` float(4, 2) DEFAULT NULL COMMENT '边际中标倍数',
+    `bondtype` char(15) NOT NULL COMMENT '债券类型'
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8 COMMENT = '从wind一级发行专题中下载的数据'
     """
     _ = cur.execute(sql_tb_pri)
+
+    sql_appendix1 = """
+    create table if not exists appendix1(
+    `dt` date NOT NULL COMMENT '招标日期',
+    `code` char(15) NOT NULL PRIMARY KEY COMMENT '债券代码',
+    `name` char(15) NOT NULL COMMENT '债券名称',
+    `term` int NOT NULL COMMENT '债券期限',
+    `amount` float(6, 2) NOT NULL COMMENT '债券发行量',
+    `rate` float(6, 4) NOT NULL COMMENT '加权利率',
+    `mg_rate` float(6, 4) DEFAULT NULL COMMENT '边际利率',
+    `multiplier` float(4, 2) DEFAULT NULL COMMENT '全场倍数',
+    `mg_multiplier` float(4, 2) DEFAULT NULL COMMENT '边际倍数',
+    `dt_pay` date NOT NULL COMMENT '缴款日',
+    `dt_list` date NOT NULL COMMENT '上市日'
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8 COMMENT = '从QB中下载的数据'
+    """
+    _ = cur.execute(sql_appendix1)
 
 
 class Data(object):
@@ -93,6 +111,7 @@ class ReadExcel(object):
     """本类用于从Excel表格中读取数据"""
     def __init__(self, bondtype, year, xlapp):
         self.bondtype = bondtype
+        self.year = year
         if bondtype in ["国开债", "国债"]:
             self.filename = data_path + r"\债券招投标结果（{}{}）.xlsx".format(bondtype, year)
         elif bondtype == "利率债发行":
@@ -102,18 +121,45 @@ class ReadExcel(object):
         self.ws = self.wb.Worksheets(1)
 
     def extract(self):
-        if self.bondtype in ["国债", "国开债"]:
-            pass
+        """从excel中提取数据"""
+        if self.bondtype == "国债":
+            res = self.__data1(self)
         elif self.bondtype == "利率债":
             pass
+        elif self.bondtype == "国开债":
+            pass
+        return res
 
     def __data1(self):
-        pass
+        """从国债招投标结果中提取附息国债的数据"""
+        cont_pattern = re.compile(r"\d{2}00\d{2}x+", re.I)
+        init_pattern = re.compile(r"\d{2}00\d{2}[^xX]+")
+        data = self.ws.Range(self.ws.Cells(2,1), self.ws.Cells(2,31).End(4)).Value
+        # 首发国债数据
+        init = [[d[2].strftime("%Y-%m-%d"), d[0], d[1], d[4], d[29], d[10], self.multipliers(d[20], 2),
+                 self.mg_multipliers(d[14], d[15]), d[30]] for d in data if re.match(init_pattern, d[0])]
+        # 续发国债数据
+        cont = [[d[2].strftime("%Y-%m-%d"), d[0], d[1], d[4], d[27], d[13], self.multipliers(d[20], 2),
+                 self.mg_multipliers(d[14], d[15]), d[30]] for d in data if re.match(cont_pattern, d[0])]
+        return [init, cont]
 
     def __data2(self):
-        pass
+        """从利率债发行结果中提取需要的数据"""
 
 
+    @staticmethod
+    def mg_multipliers(a, b):
+        if a is None or b is None:
+            return None
+        else:
+            return round(a/b, 2)
+
+    @staticmethod
+    def multipliers(a, b):
+        if a is None:
+            return None
+        else:
+            return round(a, b)
 
 
 class Excel2DB(object):
