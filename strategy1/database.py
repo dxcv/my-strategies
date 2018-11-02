@@ -216,7 +216,7 @@ class Excel2DB(object):
     """本类用于从Excel中读取数据后写入数据库"""
     def __init__(self, data_path, db):
         self.data_path = data_path  # 存放excel文件的路径
-        self.xlapp = win32com.client.gencache.EnsureDispatch("Excel.Application")
+        self.xlapp = win32com.client.Dispatch("Excel.Application")
         self.db = db
         self.cur = self.db.cursor()
 
@@ -254,21 +254,29 @@ class Excel2DB(object):
             self.insert1("QB补充", year)
         if 2017 in years:
             self.insert2()
+        upper_sql = """update tb_pri set code = upper(code)"""
+        XX__sql = """update tb_pri set code = concat(left(code, 6), "X2.IB") where code regexp '.{6}XX.IB'"""
+        self.cur.execute(upper_sql)  # 部分债券代码的X是小写，会对表格联结产生影响
+        self.cur.execute(XX__sql)
+        self.db.commit()
 
-    def update1(self, mode=0):
-        """由于从WIND下载的17年7月之后的招投标结果缺少边际利率，全场倍数与边际倍数，因此可以使用QB的数据来进行补充
+    def update(self, mode=0):
+        """由于从WIND下载的17年7月之后的招投标结果缺少边际利率，全场倍数与边际倍数,有的缺少中标利率，因此可以使用QB的数据来进行补充
         可以对三个字段分别更新或者一起更新（mode=0)"""
         sql1 = """update tb_pri t inner join appendix1 a on t.code = a.code 
         set t.multiplier = a.multiplier where t.multiplier is NULL"""
         sql2 = """update tb_pri t inner join appendix1 a on t.code = a.code
         set t.mg_multiplier = a.mg_multiplier where t.mg_multiplier is NULL"""
         sql3 = """update tb_pri t inner join appendix1 a on t.code = a.code
-        set t.mg_rate = a.mg_rate where t.mg_rate is NULL"""
+        set t.mg_rate = a.mg_rate where (t.mg_rate is NULL or t.mg_rate > 50) and a.mg_rate is not NULL"""
+        sql4 = """update tb_pri t inner join appendix1 a on t.code = a.code
+        set t.rate = a.rate where t.rate is NULL"""
         try:
             if mode == 0:
                 self.cur.execute(sql1)
                 self.cur.execute(sql2)
                 self.cur.execute(sql3)
+                self.cur.execute(sql4)
             else:
                 self.cur.execute(eval("sql{}".format(mode)))
         except:
@@ -276,6 +284,13 @@ class Excel2DB(object):
             self.db.rollback()
         else:
             self.db.commit()
+
+    def update_mg_rate(self):
+        """在续发国债招标发行中，Wind给出的边际利率其实是价格，需要转换为利率，借助BondYIM类可以做到将价格转换为收益率"""
+        # 利用边际利率是否大于50来判断该字段的记录是价格还是利率，当大于50时一般对应的时价格，因为利率很难超过50%
+        sql_select = """select t1.dt, t1.code, t1.term, t1.rate, t1.mg_rate, t2.dt, t2.code, t2.rate
+                     from tb_pri t1, tb_pri t2 where t2.code = concat(left(t1.code, 6), ".IB") and t1.mg_rate > 50"""
+        # TODO
 
     def close(self):
         self.cur.close()
@@ -285,9 +300,10 @@ def main():
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
     years = range(2013, 2019)
+    e2db = Excel2DB(data_path, db)
     try:
-        e2db = Excel2DB(data_path, db)
         e2db.insert(years)
+        e2db.update()
     finally:
         e2db.close()
         db.close()
