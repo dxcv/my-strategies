@@ -27,7 +27,9 @@ def create_database(cur):
     `mg_rate` float(7, 4) DEFAULT NULL COMMENT '边际中标利率',
     `multiplier` float(5, 2) DEFAULT NULL COMMENT '中标倍数',
     `mg_multiplier` float(5, 2) DEFAULT NULL COMMENT '边际中标倍数',
-    `bondtype` char(15) DEFAULT "国债" COMMENT '债券类型'
+    `bond_type` char(15) DEFAULT "国债" COMMENT '债券类型',
+    `bid_way` char(15) COMMENT '招标方式',
+    `target` char(15) COMMENT '招标标的'
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '从wind一级发行专题中下载的数据'
     """
     _ = cur.execute(sql_tb_pri)
@@ -130,37 +132,46 @@ class ReadExcel(object):
     def __data1(self):
         """从国债招投标结果中提取附息国债的数据"""
         cont_pattern = re.compile(r"\d{2}00\d{2}x+", re.I)
-        init_pattern = re.compile(r"\d{2}00\d{2}[^xX]+")
+        init_pattern = re.compile(r"\d{2}00\d{2}[^xX\d]+")
         data = self.ws.Range(self.ws.Cells(2,1), self.ws.Cells(2,31).End(4)).Value
         # 首发国债数据
         init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[10], self.multipliers(d[20], 2),
-                 self.mg_multipliers(d[14], d[15]), d[30]], ) for d in data if re.match(init_pattern, d[0])]
+                 self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]], )
+                for d in data if re.match(init_pattern, d[0])]
         # 续发国债数据
         cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[13], self.multipliers(d[20], 2),
-                 self.mg_multipliers(d[14], d[15]), d[30]], ) for d in data if re.match(cont_pattern, d[0])]
+                 self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]], )
+                for d in data if re.match(cont_pattern, d[0])]
         init.extend(cont)
         return init
 
     def __data2(self):
-        """从利率债发行结果中提取需要的附息国债的数据"""
-        p = re.compile(r"\d{2}附息国债")
+        """从利率债发行结果中提取需要的附息国债与国开债的数据"""
+        p1 = re.compile(r"\d{2}附息国债")
+        p2 = re.compile(r"\d{2}国开\d{2}")
         data = self.ws.Range(self.ws.Cells(3, 1), self.ws.Cells(3, 12).End(4)).Value
-        res = [([self.cdt2dt(d[0]), self.name2code(d[2]), self.term2int(d[3]), d[4], d[5], d[6], d[7],
-                 self.qb_mg_multipliers(d[8]), self.cdt2dt(d[10]), self.cdt2dt(d[11])], )
-               for d in data if re.match(p, d[2])]
+        res = [([self.cdt2dt(d[0]), self.name2code1(d[2]), self.term2int(d[3]), d[4], d[5], d[6], d[7],
+                 self.qb_mg_multipliers(d[8]), self.cdt2dt(d[10]), self.cdt2dt(d[11])],)
+               for d in data if re.match(p1, d[2])]
+        res1 = [([self.cdt2dt(d[0]), self.name2code2(d[2]), self.term2int(d[3]), d[4], d[5], d[6], d[7],
+                 self.qb_mg_multipliers(d[8]), self.cdt2dt(d[10]), self.cdt2dt(d[11])],)
+                for d in data if re.match(p2, d[2])]
+        res.extend(res1)
         return res
 
     def __data3(self):
         """从国开债招投标结果中提取国开债的数据"""
-        init_pattern = re.compile(r"\d{2}02\d{2}[^Z]+", re.I)
-        cont_pattern = re.compile(r"\d{2}02\d{2}Z+", re.I)
+        init_pattern = re.compile(r"\d{2}02\d{2}[^ZH\d]+", re.I)
+        cont_pattern = re.compile(r"\d{2}02\d{2}[ZH]+", re.I)
         data = self.ws.Range(self.ws.Cells(2, 1), self.ws.Cells(2, 31).End(4)).Value
         # 首发国开债数据
         init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[29], self.multipliers(d[20], 2),
-                  self.mg_multipliers(d[14], d[15]), d[30]],) for d in data if re.match(init_pattern, d[0])]
+                  self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]],)
+                for d in data if re.match(init_pattern, d[0])]
         # 续发国开债数据
         cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[27], self.multipliers(d[20], 2),
-                  self.mg_multipliers(d[14], d[15]), d[30]],) for d in data if re.match(cont_pattern, d[0])]
+                  self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]],)
+                for d in data if re.match(cont_pattern, d[0])]
         init.extend(cont)
         return init
 
@@ -201,7 +212,7 @@ class ReadExcel(object):
             return a
 
     @staticmethod
-    def name2code(name):
+    def name2code1(name):
         """根据国债名称获得债券代码"""
         ym_p = re.compile(r"\d{2}")
         x_p = re.compile(r"X\d+", re.I)
@@ -217,12 +228,30 @@ class ReadExcel(object):
         return res
 
     @staticmethod
+    def name2code2(name):
+        """根据国开债名称获得债券代码"""
+        ym_p = re.compile(r"\d{2}")
+        x_p = re.compile(r"(X\d+)|H", re.I)
+        res_ym = re.findall(ym_p, name)
+        res_x = re.search(x_p, name)
+        if res_x:
+            if res_x.group() == "X1":
+                res = res_ym[0] + "02" + res_ym[1] + "Z" + ".IB"
+            elif res_x.group() == "H":
+                res = res_ym[0] + "02" + res_ym[1] + "H" + ".IB"
+            else:
+                res = res_ym[0]+"02"+res_ym[1]+"Z"+res_x.group()[1:]+".IB"
+        else:
+            res = res_ym[0]+"02"+res_ym[1]+".IB"
+        return res
+
+    @staticmethod
     def term2int(term:str):
         """将字符串形式的期限转换为整数"""
-        p = re.compile(r"\d+Y")
+        p = re.compile(r".+Y")
         res = re.match(p, term)
         if res:
-            res = int(res.group()[:-1])
+            res = float(res.group()[:-1])
         return res
 
 
@@ -257,10 +286,10 @@ class Excel2DB(object):
             self.db.commit()
 
     def insert2(self, dt1='2017-7-29', dt2='2017-11-21'):
-        """从wind数据库上下载的招投标结果缺失了2017年7月29日至11月21日之间的数据，可从QB的表格内补充该部分数据至tb_pri"""
+        """从wind数据库上下载的国债招投标结果缺失了2017年7月29日至11月21日之间的数据，可从QB的表格内补充该部分数据至tb_pri"""
         sql = """insert into tb_pri(dt, code, term, rate, mg_rate, multiplier, mg_multiplier) 
               select dt, code, term, rate, mg_rate, multiplier, mg_multiplier from appendix1 
-              where dt between %s and %s"""
+              where dt between %s and %s and code regexp '[:alnum:]{2}00.*'"""
         self.cur.execute(sql, (dt1, dt2))
         self.db.commit()
 
@@ -268,6 +297,7 @@ class Excel2DB(object):
         for year in years:
             self.insert1("国债", year)
             self.insert1("QB补充", year)
+            self.insert1("国开债", year)
         if 2017 in years:
             self.insert2()
         upper_sql = """update tb_pri set code = upper(code)"""
@@ -296,7 +326,7 @@ class Excel2DB(object):
             else:
                 self.cur.execute(eval("sql{}".format(mode)))
         except:
-            print("Excel2DB.update1出现错误")
+            print("Excel2DB.update出现错误")
             self.db.rollback()
         else:
             self.db.commit()
