@@ -14,7 +14,7 @@ import scipy.optimize as optimize
 import re
 
 
-def create_database(cur):
+def create_database(cur, table=None):
     """本函数用于创建数据库与表"""
     _ = cur.execute("create database if not exists strategy1 character set UTF8MB4")
     _ = cur.execute("use strategy1")
@@ -32,8 +32,6 @@ def create_database(cur):
     `target` char(15) COMMENT '招标标的'
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '从wind一级发行专题中下载的数据'
     """
-    _ = cur.execute(sql_tb_pri)
-
     sql_appendix1 = """
     create table if not exists appendix1(
     `dt` date NOT NULL COMMENT '招标日期',
@@ -48,7 +46,11 @@ def create_database(cur):
     `dt_list` date DEFAULT NULL COMMENT '上市日'
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '从QB中下载的数据'
     """
-    _ = cur.execute(sql_appendix1)
+    if table is None:
+        _ = cur.execute(sql_tb_pri)
+        _ = cur.execute(sql_appendix1)
+    else:
+        _ = cur.execute(eval("sql_{}".format(table)))
 
 
 class Data(object):
@@ -257,12 +259,11 @@ class ReadExcel(object):
 
 class Excel2DB(object):
     """本类用于从Excel中读取数据后写入数据库"""
-    def __init__(self, data_path, db):
+    def __init__(self, data_path, db, cur):
         self.data_path = data_path  # 存放excel文件的路径
         self.xlapp = win32com.client.Dispatch("Excel.Application")
         self.db = db
-        self.cur = self.db.cursor()
-        create_database(self.cur)
+        self.cur = cur
 
     def insert1(self, bondtype, year):
         """按表格类型与年份将单张excel表格写入数据库"""
@@ -349,21 +350,32 @@ class Excel2DB(object):
         else:
             self.db.commit()
 
-    def close(self):
-        self.cur.close()
+
+class Wind2DB(object):
+    """Wind2DB类主要用于从Wind数据库中提取所需数据并写入数据库"""
+    def __init__(self, db, cur):
+        self.db = db
+        self.cur = cur
+
+    def get_data(self, sql_select=None):
+        if sql_select is None:
+            sql_select = """select dt, code from tb_pri"""
+
 
 
 def main():
-    db = pymysql.connect("localhost", "root", "root", charset="utf8")
     data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
+    db = pymysql.connect("localhost", "root", "root", charset="utf8")
+    cur = db.cursor()
+    create_database(cur)
     years = range(2013, 2019)
-    e2db = Excel2DB(data_path, db)
+    e2db = Excel2DB(data_path, db, cur)
     try:
         e2db.insert(years)
         e2db.update()
         e2db.update_mg_rate()
     finally:
-        e2db.close()
+        cur.close()
         db.close()
 
 
