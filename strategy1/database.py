@@ -46,11 +46,29 @@ def create_database(cur, table=None):
     `dt_list` date DEFAULT NULL COMMENT '上市日'
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '从QB中下载的数据'
     """
+    sql_tb_sec = """
+    create table if not exists tb_sec(
+    `dt` date NOT NULL COMMENT '招标日期',
+    `code` char(15) NOT NULL COMMENT '续发债券代码',
+    `code0` char(15) NOT NULL COMMENT '续发债对应首发债券代码',
+    `term` float(4,2) NOT NULL COMMENT '债券期限',
+    `yield0` float(7,4) DEFAULT NULL COMMENT '发行前一交易日中债估值收益率',
+    `yield1` float(7,4) DEFAULT NULL COMMENT '发行当日中债估值收益率',
+    `yield2` float(7,4) DEFAULT NULL COMMENT '发行次一交易日中债估值收益率',
+    `dt0` date NOT NULL COMMENT '发行前一交易日',
+    `dt2` date NOT NULL COMMENT '发行次一交易日'
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情'"""
     if table is None:
         _ = cur.execute(sql_tb_pri)
         _ = cur.execute(sql_appendix1)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
+
+
+def dt_offset(offset:int, dt0):
+    dt = w.tdaysoffset(offset, dt0, "tradingCalendar=NIB").Data[0][0]
+    dt = dt.strftime("%Y-%m-%d")
+    return dt
 
 
 class Data(object):
@@ -357,9 +375,11 @@ class Wind2DB(object):
         self.db = db
         self.cur = cur
 
-    def get_data(self, sql_select=None):
-        if sql_select is None:
-            sql_select = """select dt, code from tb_pri"""
+    def get_data(self):
+        sql1 = """select concat(left(code, 6), ".IB") as code_init, count(*) as num from tb_pri 
+              group by left(code, 6) having num>1"""
+        codes_init = Data(sql1, self.cur).select_col(0)
+
 
 
 
