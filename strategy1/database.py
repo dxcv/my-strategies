@@ -48,15 +48,11 @@ def create_database(cur, table=None):
     """
     sql_tb_sec = """
     create table if not exists tb_sec(
-    `dt` date NOT NULL COMMENT '招标日期',
+    `dt` date NOT NULL COMMENT '日期',
     `code` char(15) NOT NULL COMMENT '续发债券代码',
     `code0` char(15) NOT NULL COMMENT '续发债对应首发债券代码',
     `term` float(4,2) NOT NULL COMMENT '债券期限',
-    `yield0` float(7,4) DEFAULT NULL COMMENT '发行前一交易日中债估值收益率',
-    `yield1` float(7,4) DEFAULT NULL COMMENT '发行当日中债估值收益率',
-    `yield2` float(7,4) DEFAULT NULL COMMENT '发行次一交易日中债估值收益率',
-    `dt0` date NOT NULL COMMENT '发行前一交易日',
-    `dt2` date NOT NULL COMMENT '发行次一交易日'
+    `yield` float(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率'    
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情'"""
     if table is None:
         _ = cur.execute(sql_tb_pri)
@@ -65,10 +61,12 @@ def create_database(cur, table=None):
         _ = cur.execute(eval("sql_{}".format(table)))
 
 
-def dt_offset(offset:int, dt0):
+def dt_offset( dt0, offset: int):
     dt = w.tdaysoffset(offset, dt0, "tradingCalendar=NIB").Data[0][0]
     dt = dt.strftime("%Y-%m-%d")
     return dt
+
+
 
 
 class Data(object):
@@ -377,9 +375,31 @@ class Wind2DB(object):
 
     def get_data(self):
         sql1 = """select concat(left(code, 6), ".IB") as code_init, count(*) as num from tb_pri 
-              group by left(code, 6) having num>1"""
+            group by left(code, 6) having num>1"""
         codes_init = Data(sql1, self.cur).select_col(0)
+        # 利用首发债代码筛选出对应的续发债的发行日期
+        data = []
+        for code_init in codes_init:
+            p = code_init[0:6] + "[XZH]"
+            sql2 = """select code, dt, term from tb_pri where code regexp %s"""
+            datum = Data(sql2, self.cur, p).data
+            for d in datum:
+                # print(d)
+                res = w.wsd(code_init, "yield_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 4),
+                            "credibility=1;TradingCalendar=NIB")
+                ys = res.Data[0]
+                dts = res.Times
+                for y, dt in zip(ys, dts):
+                    data.append(([dt, d[0], code_init, d[2], y],))
 
+# ('170205Z8.IB', datetime.date(2017, 6, 6), 3)
+# ('170205Z9.IB', datetime.date(2017, 6, 13), 3)
+# Traceback (most recent call last):
+#   File "<pyshell#78>", line 7, in <module>
+#     res = w.wsd(code_init, "yield_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 4), "credibility=1;TradingCalendar=NIB")
+#   File "<pyshell#9>", line 3, in dt_offset
+#     dt = dt.strftime("%Y-%m-%d")
+# AttributeError: 'str' object has no attribute 'strftime'
 
 
 
