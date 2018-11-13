@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import scipy.optimize as optimize
 import re
+import math
 
 
 def create_database(cur, table=None):
@@ -22,7 +23,7 @@ def create_database(cur, table=None):
     create table if not exists tb_pri(
     `dt` date NOT NULL COMMENT '发行日期',
     `code` char(15) NOT NULL PRIMARY KEY COMMENT '债券代码',
-    `term` int NOT NULL COMMENT '债券期限',
+    `term` float(4,2) NOT NULL COMMENT '债券期限',
     `rate` float(6, 4) DEFAULT NULL COMMENT '中标利率',
     `mg_rate` float(7, 4) DEFAULT NULL COMMENT '边际中标利率',
     `multiplier` float(5, 2) DEFAULT NULL COMMENT '中标倍数',
@@ -36,7 +37,7 @@ def create_database(cur, table=None):
     create table if not exists appendix1(
     `dt` date NOT NULL COMMENT '招标日期',
     `code` char(15) NOT NULL PRIMARY KEY COMMENT '债券代码',
-    `term` int NOT NULL COMMENT '债券期限',
+    `term` float(4,2) NOT NULL COMMENT '债券期限',
     `amount` float(6, 2) DEFAULT NULL COMMENT '债券发行量',
     `rate` float(6, 4) NOT NULL COMMENT '加权利率',
     `mg_rate` float(6, 4) DEFAULT NULL COMMENT '边际利率',
@@ -52,21 +53,33 @@ def create_database(cur, table=None):
     `code` char(15) NOT NULL COMMENT '续发债券代码',
     `code0` char(15) NOT NULL COMMENT '续发债对应首发债券代码',
     `term` float(4,2) NOT NULL COMMENT '债券期限',
-    `yield` float(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率'    
-    )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情'"""
+    `yield` float(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率',
+    primary key(code, dt)   
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情'
+    """
+    sql_tb_rate = """
+    create table if not exists tb_rate(
+    `dt` DATE NOT NULL COMMENT '日期',
+    `term` float(4,2) NOT NULL COMMENT '期限',
+    `bond_type` char(10) NOT NULL COMMENT '债券类型',
+    `rate` float(7,4) NOT NULL COMMENT '中债估值收益率',
+    primary key(dt, term, bond_type)
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '各期限国债国开债到期收益率'
+    """
     if table is None:
-        _ = cur.execute(sql_tb_pri)
-        _ = cur.execute(sql_appendix1)
+        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate]:
+            _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
 
 
-def dt_offset( dt0, offset: int):
+def dt_offset(dt0, offset:int):
     dt = w.tdaysoffset(offset, dt0, "tradingCalendar=NIB").Data[0][0]
-    dt = dt.strftime("%Y-%m-%d")
+    try:
+        dt = dt.strftime("%Y-%m-%d")
+    except AttributeError as e:
+        print(dt, e)
     return dt
-
-
 
 
 class Data(object):
@@ -106,7 +119,7 @@ class BondYTM(object):
         dt_delta_days = (dt - self.dt0).days
         year_days = 365
         t0 = 1 - dt_delta_days * self.freq / year_days
-        ts = [i for i in range(self.terms*self.freq)]
+        ts = [i for i in range(int(self.terms)*self.freq)]
         return t0, ts
 
     def bond_ytm(self, dt:dtt.date, price, guess=0.03):
@@ -373,7 +386,8 @@ class Wind2DB(object):
         self.db = db
         self.cur = cur
 
-    def get_data(self):
+    def get_data_tb_sec(self):
+        """本方法用于提取续发债发行日的前一交易日至发行后四个交易日（共6个交易日）的债券二级市场中债估值收益率"""
         sql1 = """select concat(left(code, 6), ".IB") as code_init, count(*) as num from tb_pri 
             group by left(code, 6) having num>1"""
         codes_init = Data(sql1, self.cur).select_col(0)
@@ -390,17 +404,35 @@ class Wind2DB(object):
                 ys = res.Data[0]
                 dts = res.Times
                 for y, dt in zip(ys, dts):
-                    data.append(([dt, d[0], code_init, d[2], y],))
+                    data.append(([dt, d[0], code_init, d[2], None if math.isnan(y) else y],))
+        return data
 
-# ('170205Z8.IB', datetime.date(2017, 6, 6), 3)
-# ('170205Z9.IB', datetime.date(2017, 6, 13), 3)
-# Traceback (most recent call last):
-#   File "<pyshell#78>", line 7, in <module>
-#     res = w.wsd(code_init, "yield_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 4), "credibility=1;TradingCalendar=NIB")
-#   File "<pyshell#9>", line 3, in dt_offset
-#     dt = dt.strftime("%Y-%m-%d")
-# AttributeError: 'str' object has no attribute 'strftime'
+    @staticmethod
+    def get_data_tb_rate():
+        code1 = ["S0059744", "S0059745", "S0059746", "S0059747", "S0059748", "S0059749", "S0059751",
+                 "S0059752", "M1000170"]
+        code2 = ["M1004263", "M1004264", "M1004265", "M1004267", "M1004269", "M1004271", "M1004273",
+                 "M1004274", "M1004275"]
+        codes = [code1, code2]
+        bond_type = ["国债", "国开债"]
+        data = []
+        terms = [1, 2, 3, 5, 7, 10, 20, 30, 50]
+        for m in range(len(codes)):
+            res_w = w.edb(codes[m], "2013-1-1", "2018-10-22", "Fill=Previous")
+            for n in range(len(terms)):
+                d = [([res_w.Times[i], terms[n], bond_type[m], res_w.Data[n][i]],) for i in range(len(res_w.Times))]
+                data.extend(d)
+        return data
 
+    def insert(self, table=None):
+        if table:
+            data = eval("self.get_data_{}()".format(table))
+            self.cur.executemany(r"insert into {} values %s".format(table), data)
+        else:
+            for t in ["tb_sec", "tb_rate"]:
+                data = eval("self.get_data_{}".format(t))
+                self.cur.executemany(r"insert into {} values %s".format(t), data)
+        self.db.commit()
 
 
 def main():
