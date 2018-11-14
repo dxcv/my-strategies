@@ -3,16 +3,11 @@
 
 import pymysql
 import win32com.client
-import pywintypes
 from WindPy import w
-import math
 import datetime as dtt
-import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
 import scipy.optimize as optimize
-import re
-import math
+import re, math
 
 
 def create_database(cur, table=None):
@@ -66,8 +61,17 @@ def create_database(cur, table=None):
     primary key(dt, term, bond_type)
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '各期限国债国开债到期收益率'
     """
+    sql_future = """
+    CREATE TABLE IF NOT EXISTS future(
+    `dt` DATE NOT NULL COMMENT '日期',
+    `settle` FLOAT(7,4) NOT NULL COMMENT '结算价',
+    `close` FLOAT(7,4) NOT NULL COMMENT '收盘价',
+    `term` TINYINT NOT NULL COMMENT '国债期货期限',
+    CONSTRAINT pk PRIMARY KEY(`dt`, `term`)
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '国债期货结算价与收盘价'
+    """
     if table is None:
-        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate]:
+        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future]:
             _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
@@ -80,6 +84,22 @@ def dt_offset(dt0, offset:int):
     except AttributeError as e:
         print(dt, e)
     return dt
+
+
+def p2y_future(price, term):
+    if term == 5:
+        flow = [3, 3, 3, 3, 103]
+    elif term == 10:
+        flow = [3, 3, 3, 3, 3, 3, 3, 3, 3, 103]
+    elif term == 2:
+        flow = [3, 103]
+    else:
+        flow = None
+    if isinstance(price, list):
+        res = [100 * round(np.irr([-p, *flow]), 6) for p in price]
+    else:
+        res = 100 * round(np.irr([-price, *flow]), 6)
+    return res
 
 
 class Data(object):
@@ -408,7 +428,8 @@ class Wind2DB(object):
         return data
 
     @staticmethod
-    def get_data_tb_rate():
+    def get_data_tb_rate(dt1="2013-1-1", dt2="2018-10-22"):
+        """本方法用于从WIND获取国债与国开债的期限利率的中债估值，共9个期限，分别是1Y 2Y 3Y 5Y 7Y 10Y 20Y 30Y 50Y"""
         code1 = ["S0059744", "S0059745", "S0059746", "S0059747", "S0059748", "S0059749", "S0059751",
                  "S0059752", "M1000170"]
         code2 = ["M1004263", "M1004264", "M1004265", "M1004267", "M1004269", "M1004271", "M1004273",
@@ -418,10 +439,24 @@ class Wind2DB(object):
         data = []
         terms = [1, 2, 3, 5, 7, 10, 20, 30, 50]
         for m in range(len(codes)):
-            res_w = w.edb(codes[m], "2013-1-1", "2018-10-22", "Fill=Previous")
+            res_w = w.edb(codes[m], dt1, dt2, "Fill=Previous")
             for n in range(len(terms)):
                 d = [([res_w.Times[i], terms[n], bond_type[m], res_w.Data[n][i]],) for i in range(len(res_w.Times))]
                 data.extend(d)
+        return data
+
+    @staticmethod
+    def get_data_future(dt="2018-10-22"):
+        """本函数用于从WIND获取建立国债期货结算价与收盘价表格所需的数据,包括TF与T合约"""
+        wd_tf = w.wsd("TF.CFE", "settle,close", "2013-9-6", dt, "")
+        wd_t =  w.wsd("TF.CFE", "settle,close", "2015-3-20", dt, "")
+        wds = [wd_tf, wd_t]
+        terms = [5, 10]
+        data = []
+        for m in range(len(terms)):
+            wd = list(zip(wds[m].Times, p2y_future(wds[m].Data[0], terms[m]), p2y_future(wds[m].Data[1], terms[m])))
+            d=[([*wd[i], terms[m]],) for i in range(len(wd))]
+            data.extend(d)
         return data
 
     def insert(self, table=None):
@@ -429,7 +464,7 @@ class Wind2DB(object):
             data = eval("self.get_data_{}()".format(table))
             self.cur.executemany(r"insert into {} values %s".format(table), data)
         else:
-            for t in ["tb_sec", "tb_rate"]:
+            for t in ["tb_sec", "tb_rate", "future"]:
                 data = eval("self.get_data_{}".format(t))
                 self.cur.executemany(r"insert into {} values %s".format(t), data)
         self.db.commit()
@@ -439,16 +474,19 @@ def main():
     data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
-    create_database(cur)
-    years = range(2013, 2019)
-    e2db = Excel2DB(data_path, db, cur)
-    try:
-        e2db.insert(years)
-        e2db.update()
-        e2db.update_mg_rate()
-    finally:
-        cur.close()
-        db.close()
+    w.start()
+    create_database(cur, "future")
+    # years = range(2013, 2019)
+    # e2db = Excel2DB(data_path, db, cur)
+    # try:
+    #     e2db.insert(years)
+    #     e2db.update()
+    #     e2db.update_mg_rate()
+    # finally:
+    #     cur.close()
+    #     db.close()
+    w2db = Wind2DB(db, cur)
+    w2db.insert("future")
 
 
 if __name__ == "__main__":
