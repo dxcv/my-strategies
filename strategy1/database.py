@@ -49,6 +49,8 @@ def create_database(cur, table=None):
     `code0` char(15) NOT NULL COMMENT '续发债对应首发债券代码',
     `term` float(4,2) NOT NULL COMMENT '债券期限',
     `yield` float(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率',
+    `net` float(7,4) DEFAULT NULL COMMENT '中债估值净价',
+    `dirty` float(7,4) DEFAULT NULL COMMENT '中债估值全价',
     primary key(code, dt)   
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情'
     """
@@ -57,13 +59,15 @@ def create_database(cur, table=None):
     `dt` DATE NOT NULL COMMENT '日期',
     `term` float(4,2) NOT NULL COMMENT '期限',
     `bond_type` char(10) NOT NULL COMMENT '债券类型',
-    `rate` float(7,4) NOT NULL COMMENT '中债估值收益率',
+    `rate` float(7,4) NOT NULL COMMENT '中债估值收益率',    
     primary key(dt, term, bond_type)
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '各期限国债国开债到期收益率'
     """
     sql_future = """
     CREATE TABLE IF NOT EXISTS future(
     `dt` DATE NOT NULL COMMENT '日期',
+    `srate` FLOAT(7,4) NOT NULL COMMENT '结算收益率',
+    `crate` FLOAT(7,4) NOT NULL COMMENT '收盘收益率',
     `settle` FLOAT(7,4) NOT NULL COMMENT '结算价',
     `close` FLOAT(7,4) NOT NULL COMMENT '收盘价',
     `term` TINYINT NOT NULL COMMENT '国债期货期限',
@@ -419,12 +423,13 @@ class Wind2DB(object):
             datum = Data(sql2, self.cur, p).data
             for d in datum:
                 # print(d)
-                res = w.wsd(code_init, "yield_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 4),
+                res = w.wsd(code_init, "yield_cnbd,net_cnbd,dirty_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 4),
                             "credibility=1;TradingCalendar=NIB")
-                ys = res.Data[0]
+                ys, ns, ds = res.Data
                 dts = res.Times
-                for y, dt in zip(ys, dts):
-                    data.append(([dt, d[0], code_init, d[2], None if math.isnan(y) else y],))
+                for y, n, dd, dt in zip(ys, ns, ds, dts):
+                    data.append(([dt, d[0], code_init, d[2], None if math.isnan(y) else y,
+                                  None if math.isnan(n) else n, None if math.isnan(dd) else dd],))
         return data
 
     @staticmethod
@@ -454,7 +459,8 @@ class Wind2DB(object):
         terms = [5, 10]
         data = []
         for m in range(len(terms)):
-            wd = list(zip(wds[m].Times, p2y_future(wds[m].Data[0], terms[m]), p2y_future(wds[m].Data[1], terms[m])))
+            wd = list(zip(wds[m].Times, p2y_future(wds[m].Data[0], terms[m]), p2y_future(wds[m].Data[1], terms[m]),
+                          wds[m].Data[0], wds[m].Data[1]))
             d=[([*wd[i], terms[m]],) for i in range(len(wd))]
             data.extend(d)
         return data
@@ -465,7 +471,7 @@ class Wind2DB(object):
             self.cur.executemany(r"insert into {} values %s".format(table), data)
         else:
             for t in ["tb_sec", "tb_rate", "future"]:
-                data = eval("self.get_data_{}".format(t))
+                data = eval("self.get_data_{}()".format(t))
                 self.cur.executemany(r"insert into {} values %s".format(t), data)
         self.db.commit()
 
@@ -475,7 +481,7 @@ def main():
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
     w.start()
-    create_database(cur, "future")
+    create_database(cur, "tb_sec")
     # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
     # try:
@@ -486,7 +492,7 @@ def main():
     #     cur.close()
     #     db.close()
     w2db = Wind2DB(db, cur)
-    w2db.insert("future")
+    w2db.insert("tb_sec")
 
 
 if __name__ == "__main__":
