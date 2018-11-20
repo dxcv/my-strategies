@@ -51,6 +51,7 @@ def create_database(cur, table=None):
     `yield` float(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率',
     `net` float(7,4) DEFAULT NULL COMMENT '中债估值净价',
     `dirty` float(7,4) DEFAULT NULL COMMENT '中债估值全价',
+    `seq` tinyint NOT NULL COMMENT '交易日顺序',
     primary key(code, dt)   
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情'
     """
@@ -74,8 +75,20 @@ def create_database(cur, table=None):
     CONSTRAINT pk PRIMARY KEY(`dt`, `term`)
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '国债期货结算价与收盘价'
     """
+
+    sql_tb_sec_delta = """
+    create table if not exists tb_sec_delta(
+    `dt` date NOT NULL COMMENT '日期',
+    `code` char(15) NOT NULL COMMENT '续发债券代码',
+    `code0` char(15) NOT NULL COMMENT '续发债对应首发债券代码',
+    `term` float(4,2) NOT NULL COMMENT '债券期限',
+    `delta` float(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率变化',
+    `seq` tinyint NOT NULL COMMENT '交易日顺序',
+    primary key(code, seq)   
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情变化'
+    """
     if table is None:
-        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future]:
+        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta]:
             _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
@@ -423,13 +436,18 @@ class Wind2DB(object):
             datum = Data(sql2, self.cur, p).data
             for d in datum:
                 # print(d)
-                res = w.wsd(code_init, "yield_cnbd,net_cnbd,dirty_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 4),
+                res = w.wsd(code_init, "yield_cnbd,net_cnbd,dirty_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 10),
                             "credibility=1;TradingCalendar=NIB")
-                ys, ns, ds = res.Data
+                try:
+                    ys, ns, ds = res.Data
+                except ValueError as e:
+                    print(d[0], d[1], e)
+                    raise ValueError(e)
+                seq = range(len(ys))
                 dts = res.Times
-                for y, n, dd, dt in zip(ys, ns, ds, dts):
+                for y, n, dd, dt, s in zip(ys, ns, ds, dts, seq):
                     data.append(([dt, d[0], code_init, d[2], None if math.isnan(y) else y,
-                                  None if math.isnan(n) else n, None if math.isnan(dd) else dd],))
+                                  None if math.isnan(n) else n, None if math.isnan(dd) else dd, s],))
         return data
 
     @staticmethod
@@ -476,23 +494,71 @@ class Wind2DB(object):
         self.db.commit()
 
 
+class DB2self(object):
+    """本类用于创建基于数据库自身而创建的对象，例如表格、函数、过程，不需依赖外部数据源"""
+    def __init__(self, db, cur):
+        self.db = db
+        self.cur = cur
+
+    def create_function(self, funcname=None):
+        """在数据库中创建函数"""
+        sql_imp_delta = r"""
+        create function imp_delta(ccode char(15), sseq tinyint)
+        returns float(6, 2)
+        language sql deterministic 
+        begin
+          declare y0 float(7, 4);
+          declare y1 float(7, 4);
+          select yield into y0 from tb_sec where code = ccode and seq = 0;
+          if sseq = 0 then
+            select rate into y1 from tb_pri where code = ccode;
+          else
+            select yield into y1 from tb_sec where code = ccode and seq = sseq;
+          end if;
+          return (100 * (y1-y0));
+        end;              
+        """
+        if funcname:
+            self.cur.execute(eval("sql_{}".format(funcname)))
+        else:
+            for name in ["imp_delta"]:
+                self.cur.execute(eval("sql_{}".format(name)))
+
+    def insert_tb_sec_delta(self):
+        sql1 = r"""
+        insert into tb_sec_delta(dt, code, code0, term, seq)
+        select dt, code, code0, term, seq from tb_sec
+        """
+        sql2 = r"""update tb_sec_delta set delta = imp_delta(code, seq)"""
+        try:
+            self.cur.execute(sql1)
+            self.cur.execute(sql2)
+        except:
+            self.db.rollback()
+        else:
+            self.db.commit()
+
+
 def main():
     data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
     w.start()
-    create_database(cur, "tb_sec")
+    create_database(cur, "tb_sec_delta")
+    # w2db = Wind2DB(db, cur)
     # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
-    # try:
-    #     e2db.insert(years)
-    #     e2db.update()
-    #     e2db.update_mg_rate()
-    # finally:
-    #     cur.close()
-    #     db.close()
-    w2db = Wind2DB(db, cur)
-    w2db.insert("tb_sec")
+    db2self = DB2self(db, cur)
+    try:
+        # e2db.insert(years)
+        # e2db.update()
+        # e2db.update_mg_rate()
+        # w2db.insert("tb_sec")
+        # db2self.create_function("imp_delta")
+        db2self.insert_tb_sec_delta()
+    finally:
+        cur.close()
+        db.close()
 
 
 if __name__ == "__main__":
