@@ -6,6 +6,7 @@ import win32com.client
 from WindPy import w
 import datetime as dtt
 import numpy as np
+import pandas as pd
 import scipy.optimize as optimize
 import re, math
 
@@ -86,6 +87,17 @@ def create_database(cur, table=None):
     `seq` tinyint NOT NULL COMMENT '交易日顺序',
     primary key(code, seq)   
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情变化'
+    """
+    sql_future_delta = """
+    CREATE TABLE IF NOT EXISTS future_delta(
+    `dt` DATE NOT NULL COMMENT '日期',
+    `dsrate` FLOAT(7,4) NOT NULL COMMENT '结算收益率',
+    `dcrate` FLOAT(7,4) NOT NULL COMMENT '收盘收益率',
+    `dsettle` FLOAT(7,4) NOT NULL COMMENT '结算价',
+    `dclose` FLOAT(7,4) NOT NULL COMMENT '收盘价',
+    `term` TINYINT NOT NULL COMMENT '国债期货期限',
+    CONSTRAINT pk PRIMARY KEY(`dt`, `term`)
+    )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '国债期货结算价与收盘价'
     """
     if table is None:
         for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta]:
@@ -508,12 +520,13 @@ class DB2self(object):
         language sql deterministic 
         begin
           declare y0 float(7, 4);
-          declare y1 float(7, 4);
-          select yield into y0 from tb_sec where code = ccode and seq = 0;
+          declare y1 float(7, 4);          
           if sseq = 0 then
             select rate into y1 from tb_pri where code = ccode;
+            select yield into y0 from tb_sec where code = ccode and seq = 0;
           else
             select yield into y1 from tb_sec where code = ccode and seq = sseq;
+            select yield into y0 from tb_sec where code = ccode and seq = sseq-1;
           end if;
           return (100 * (y1-y0));
         end;              
@@ -538,6 +551,9 @@ class DB2self(object):
         else:
             self.db.commit()
 
+    def insert_future_delta(self):
+
+
 
 def main():
     data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
@@ -554,7 +570,7 @@ def main():
         # e2db.update()
         # e2db.update_mg_rate()
         # w2db.insert("tb_sec")
-        # db2self.create_function("imp_delta")
+        db2self.create_function("imp_delta")
         db2self.insert_tb_sec_delta()
     finally:
         cur.close()

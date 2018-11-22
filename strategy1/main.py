@@ -45,7 +45,7 @@ class ImpSat(object):
                             self.cur).select_col(0))
         plt.hist(imp, bins=np.arange(-40, 30, 1))
         plt.show()
-        
+
     def imp_future(self):
         pass
 
@@ -56,7 +56,7 @@ def main():
     db = pymysql.connect("localhost", "root", "root", "strategy1")
     cur = db.cursor()
     imp_sat = ImpSat(db, cur)
-    res = imp_sat.imp_seq([-15, -10, -5, -1, 4, 9], [1, 2, 3, 4, 5])
+    res = imp_sat.imp_seq(list(range(-19, 16, 5)), [1, 2, 3, 4, 5, 6, 7, 8, 9])
     pprint(res)
     # imp_sat.imp_dst_plot()
 
