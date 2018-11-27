@@ -1,5 +1,6 @@
 # 本文件用于创建MySQL数据库
 # 季俊男
+# 创建日期：2018/10/22
 
 import pymysql
 import win32com.client
@@ -73,6 +74,7 @@ def create_database(cur, table=None):
     `settle` FLOAT(7,4) NOT NULL COMMENT '结算价',
     `close` FLOAT(7,4) NOT NULL COMMENT '收盘价',
     `term` TINYINT NOT NULL COMMENT '国债期货期限',
+    `seq` INT NOT NULL COMMENT '按时间排序编号，5年期与10年期分开编号',
     CONSTRAINT pk PRIMARY KEY(`dt`, `term`)
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '国债期货结算价与收盘价'
     """
@@ -90,17 +92,18 @@ def create_database(cur, table=None):
     """
     sql_future_delta = """
     CREATE TABLE IF NOT EXISTS future_delta(
-    `dt` DATE NOT NULL COMMENT '日期',
-    `dsrate` FLOAT(7,4) NOT NULL COMMENT '结算收益率',
-    `dcrate` FLOAT(7,4) NOT NULL COMMENT '收盘收益率',
-    `dsettle` FLOAT(7,4) NOT NULL COMMENT '结算价',
-    `dclose` FLOAT(7,4) NOT NULL COMMENT '收盘价',
+    `dt` DATE NOT NULL COMMENT '日期',    
+    `dsettle` FLOAT(7,4) NOT NULL COMMENT '结算价价差',
+    `dclose` FLOAT(7,4) NOT NULL COMMENT '收盘价价差',
+    `dsrate` FLOAT(6,2) NOT NULL COMMENT '结算收益率差',
+    `dcrate` FLOAT(6,2) NOT NULL COMMENT '收盘收益率差',
     `term` TINYINT NOT NULL COMMENT '国债期货期限',
+    `seq` INT NOT NULL COMMENT '按时间排序编号，5年期与10年期分开编号',
     CONSTRAINT pk PRIMARY KEY(`dt`, `term`)
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '国债期货结算价与收盘价'
     """
     if table is None:
-        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta]:
+        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta, sql_future_delta]:
             _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
@@ -491,7 +494,7 @@ class Wind2DB(object):
         for m in range(len(terms)):
             wd = list(zip(wds[m].Times, p2y_future(wds[m].Data[0], terms[m]), p2y_future(wds[m].Data[1], terms[m]),
                           wds[m].Data[0], wds[m].Data[1]))
-            d=[([*wd[i], terms[m]],) for i in range(len(wd))]
+            d=[([*wd[i], terms[m], i],) for i in range(len(wd))]
             data.extend(d)
         return data
 
@@ -552,15 +555,27 @@ class DB2self(object):
             self.db.commit()
 
     def insert_future_delta(self):
+        sql = r"""
+        insert into future_delta 
+        select t1.dt, t1.settle-t2.settle, t1.close-t2.close, 100*(t1.srate-t2.srate), 100*(t1.crate-t2.crate),
+        t1.term, t1.seq-1
+        from future t1 inner join future t2 on t1.term = t2.term and t1.seq= t2.seq+1"""
+        self.cur.execute(sql)
 
-
+    def insert(self, table=None):
+        if table:
+            eval(r"self.insert_{}()".format(table))
+        else:
+            for t in ["tb_sec_delta", "future_delta"]:
+                eval(r"self.insert_{}()".format(t))
+        self.db.commit()
 
 def main():
     data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
-    w.start()
-    create_database(cur, "tb_sec_delta")
+    # w.start()
+    create_database(cur, "future_delta")
     # w2db = Wind2DB(db, cur)
     # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
@@ -569,9 +584,9 @@ def main():
         # e2db.insert(years)
         # e2db.update()
         # e2db.update_mg_rate()
-        # w2db.insert("tb_sec")
-        db2self.create_function("imp_delta")
-        db2self.insert_tb_sec_delta()
+        # w2db.insert("future")
+        # db2self.create_function("imp_delta")
+        db2self.insert("future_delta")
     finally:
         cur.close()
         db.close()

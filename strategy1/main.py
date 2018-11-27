@@ -43,22 +43,46 @@ class ImpSat(object):
         """绘制发行冲击的直方分布图"""
         imp = np.array(Data(r"select delta from tb_sec_delta where seq = 0 and delta is not null",
                             self.cur).select_col(0))
-        plt.hist(imp, bins=np.arange(-40, 30, 1))
+        plt.hist(imp, bins=np.arange(-40, 30, 1), normed=True)
         plt.show()
 
-    def imp_future(self):
-        pass
+    def imp_future(self, imp:list, seq:list, term=10, delta="dsrate"):
+        """"发行冲击对国债期货市场影响"""
+        res = list()
+        sql0 = """
+        select count(*), avg(t1.delta) from tb_sec_delta t1 inner join future_delta t2
+        on t1.dt = t2.dt
+        where t1.code in %s and t2.term = %s and t1.seq = 0
+        """
+        sql = """
+        select avg(t2.{})
+        from tb_sec_delta t1 left outer join future_delta t2
+        on t1.dt = t2.dt
+        where t1.code in %s and t2.term = %s and t1.seq = %s
+        """.format(delta)
+        codes = imp_select_code(imp, self.cur)
+        for code in codes:
+            num = len(code)
+            d = list([num])
+            for s in seq:
+                d.append(Data(sql, self.cur, (code, term, s)).data[0][0])
+            res.append(d)
+        return res
 
 
 
 
 def main():
-    db = pymysql.connect("localhost", "root", "root", "strategy1")
+    db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
     imp_sat = ImpSat(db, cur)
-    res = imp_sat.imp_seq(list(range(-19, 16, 5)), [1, 2, 3, 4, 5, 6, 7, 8, 9])
-    pprint(res)
-    # imp_sat.imp_dst_plot()
+    # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
+    # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)))
+    # for rs in res:
+    #     print()
+    #     for r in rs:
+    #         print(r, end=", ")
+    imp_sat.imp_dst_plot()
 
 
 if __name__ == "__main__":
