@@ -102,8 +102,17 @@ def create_database(cur, table=None):
     CONSTRAINT pk PRIMARY KEY(`dt`, `term`)
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '国债期货结算价与收盘价'
     """
+    sql_payment = r"""
+    CREATE TABLE IF NOT EXISTS payment(
+    `code` CHAR(15) NOT NULL COMMENT '债券代码（银行间）',
+    `pmdt` DATE DEFAULT NULL COMMENT '债券付息日',
+    `rate` FLOAT(6, 4) DEFAULT NULL COMMENT '债券利率或付息额',
+    CONSTRAINT pk PRIMARY KEY(`code`)
+    )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '债券付息日与付息额'
+    """
     if table is None:
-        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta, sql_future_delta]:
+        for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta, sql_future_delta,
+                    sql_payment]:
             _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
@@ -498,12 +507,19 @@ class Wind2DB(object):
             data.extend(d)
         return data
 
+    def get_data_payment(self):
+        sql = r"select distinct code0 from tb_sec"
+        codes = Data(sql, self.cur).select_col(0)
+        wdata = w.wss(codes, "maturitydate,couponrate", "N=0")
+        data = [(d,) for d in list(zip(wdata.Codes, wdata.Data[0], wdata.Data[1]))]
+        return data
+
     def insert(self, table=None):
         if table:
             data = eval("self.get_data_{}()".format(table))
             self.cur.executemany(r"insert into {} values %s".format(table), data)
         else:
-            for t in ["tb_sec", "tb_rate", "future"]:
+            for t in ["tb_sec", "tb_rate", "future", "payment"]:
                 data = eval("self.get_data_{}()".format(t))
                 self.cur.executemany(r"insert into {} values %s".format(t), data)
         self.db.commit()
@@ -574,19 +590,19 @@ def main():
     data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
-    # w.start()
-    create_database(cur, "future_delta")
-    # w2db = Wind2DB(db, cur)
+    w.start()
+    create_database(cur, "payment")
+    w2db = Wind2DB(db, cur)
     # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
-    db2self = DB2self(db, cur)
+    # db2self = DB2self(db, cur)
     try:
         # e2db.insert(years)
         # e2db.update()
         # e2db.update_mg_rate()
-        # w2db.insert("future")
+        w2db.insert("payment")
         # db2self.create_function("imp_delta")
-        db2self.insert("future_delta")
+        # db2self.insert("future_delta")
     finally:
         cur.close()
         db.close()
