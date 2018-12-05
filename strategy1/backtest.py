@@ -51,7 +51,7 @@ class MarketData(object):
                    (dt1, dt2)).select_col(0)
         return prices, dts
 
-    def get_last_postion_value(self, cash, ps, dt):
+    def get_last_position_value(self, cash, ps, dt):
         """对于持仓最后一天的持仓市值的计算，get_position_price无能为力，因此特别编制本方法来处理"""
         symbols = ps.keys()
         if symbols:
@@ -67,7 +67,7 @@ class MarketData(object):
             asset_matrix = np.dot(volumes, prices)
             cash_matrix = np.matrix(cash)
             total_matrix = asset_matrix + cash_matrix
-            data_matrix = np.concatenate((cash_matrix, asset_matrix, total_matrix), axis=0)
+            data_matrix = np.concatenate((cash_matrix, asset_matrix, total_matrix), axis=1)
             return pd.DataFrame(data_matrix, index=pd.to_datetime([dt]), columns=["cash", "asset", "total"])
         else:
             return pd.DataFrame([[cash, 0, cash]], index=pd.to_datetime([dt]), columns=["cash", "asset", "total"])
@@ -163,7 +163,7 @@ class Position(object):
                                                                   pd.to_datetime([self.time]), columns=["cash", "ps"]))
                 # print("指令成交")
 
-    def get_asset_value(self):
+    def get_value(self):
         """根据self.position计算连续时间上的账户资产价值，包括现金（cash), 其他资产（asset)及其总和(total),结果以
         DataFrame形式呈现"""
         res = pd.DataFrame(columns=["cash", "asset", "total"])
@@ -186,7 +186,7 @@ class Position(object):
                 res = res.append(pd.DataFrame(data, index=dt, columns=["cash", "asset", "total"]))
         ps = self.position.iloc[-1, 1]
         cash = self.position.iloc[-1, 0]
-        res = res.append(market.get_last_postion_value(cash, ps, dts[-1]))
+        res = res.append(market.get_last_position_value(cash, ps, dts[-1]))
         return res
 
 
@@ -200,10 +200,13 @@ if __name__ == "__main__":
     order3 =  Order(dtt.date(2014, 1, 29), "070205.IB", 100000, False)
     order4 = Order(dtt.date(2014, 2, 7), "140201.IB", 100000, False)
     order5 = Order(dtt.date(2014, 1, 30), "070205.IB", 100000, False)
+    order6 = Order(dtt.date(2014, 1, 30), "070205.IB", 100000, True)
     position.get_order(order1)
     position.get_order(order2)
     position.get_order(order3)
     position.get_order(order5)
+    position.get_order(order6)
+    position.get_value()
 
 
 
