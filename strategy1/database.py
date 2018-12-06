@@ -181,13 +181,14 @@ class BondYTM(object):
     def get_ts(self, dt: dtt.date):
         dt_delta_days = (dt - self.dt0).days
         year_days = 365
-        t0 = 1 - dt_delta_days * self.freq / year_days
-        ts = [i for i in range(int(self.terms)*self.freq)]
+        x, y = divmod(dt_delta_days, year_days)
+        t0 = 1 - y / year_days
+        ts = [i for i in range((int(self.terms)-x) * self.freq)]
         return t0, ts
 
-    def bond_ytm(self, dt:dtt.date, price, guess=0.03):
+    def bond_ytm(self, dt: dtt.date, price, guess=0.03):
         t0, ts = self.get_ts(dt)
-        coup = self.par * self.rate / (100 * self.freq)
+        coup = self.par * self.rate / self.freq
         ytm_func = lambda y: (sum([coup / (1 + y / self.freq) ** t for t in ts]) + self.par / (1 + y / self.freq) **
                               ts[-1]) / (1 + t0 * y / self.freq) - price
         fprime = lambda y: (sum([-t * coup / self.freq / (1 + y / self.freq) ** (t + 1) for t in ts]) - ts[
@@ -229,11 +230,11 @@ class ReadExcel(object):
         init_pattern = re.compile(r"\d{2}00\d{2}[^xX\d]+")
         data = self.ws.Range(self.ws.Cells(2,1), self.ws.Cells(2,31).End(4)).Value
         # 首发国债数据
-        init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[10], d[28], self.multipliers(d[20], 2),
+        init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[28], d[10], self.multipliers(d[20], 2),
                  self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]], )
                 for d in data if re.match(init_pattern, d[0])]
         # 续发国债数据
-        cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[13], d[28], self.multipliers(d[20], 2),
+        cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[28], d[13], self.multipliers(d[20], 2),
                  self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]], )
                 for d in data if re.match(cont_pattern, d[0])]
         init.extend(cont)
@@ -259,11 +260,11 @@ class ReadExcel(object):
         cont_pattern = re.compile(r"\d{2}02\d{2}[ZH]+", re.I)
         data = self.ws.Range(self.ws.Cells(2, 1), self.ws.Cells(2, 31).End(4)).Value
         # 首发国开债数据
-        init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[29], d[28], self.multipliers(d[20], 2),
+        init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[28], d[29], self.multipliers(d[20], 2),
                   self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]],)
                 for d in data if re.match(init_pattern, d[0])]
         # 续发国开债数据
-        cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[27], d[28], self.multipliers(d[20], 2),
+        cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[28], d[27], self.multipliers(d[20], 2),
                   self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6]],)
                 for d in data if re.match(cont_pattern, d[0])]
         init.extend(cont)
@@ -397,6 +398,7 @@ class Excel2DB(object):
         XX__sql = """update tb_pri set code = concat(left(code, 6), "X2.IB") where code regexp '.{6}XX.IB'"""
         self.cur.execute(upper_sql)  # 部分债券代码的X是小写，会对表格联结产生影响
         self.cur.execute(XX__sql)
+        self.cur.execute("delete from tb_pri where term = 0.5") # 有一只国开债剩余期限0.5年，要删掉
         self.db.commit()
 
     def update(self, mode=0):
@@ -590,19 +592,20 @@ class DB2self(object):
 
 
 def main():
-    data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
+    # data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
+    data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
-    w.start()
-    create_database(cur, "tb_pri")
+    # w.start()
+    create_database(cur)
     # w2db = Wind2DB(db, cur)
     years = range(2013, 2019)
     e2db = Excel2DB(data_path, db, cur)
-    db2self = DB2self(db, cur)
+    # db2self = DB2self(db, cur)
     try:
         e2db.insert(years)
-        e2db.update()
-        e2db.update_mg_rate()
+        # e2db.update()
+        # e2db.update_mg_rate()
         # w2db.insert("payment")
         # db2self.create_function("imp_delta")
         # db2self.insert("future_delta")
