@@ -22,7 +22,7 @@ def create_database(cur, table=None):
     `code` char(15) NOT NULL PRIMARY KEY COMMENT '债券代码',
     `term` float(4,2) NOT NULL COMMENT '债券期限',
     `rate` float(6, 4) DEFAULT NULL COMMENT '中标利率',
-    `price` float(7, 4) DEFAULT null COMMENT '中标价格',
+    `price` float(7, 4) DEFAULT NULL COMMENT '中标价格',
     `mg_rate` float(7, 4) DEFAULT NULL COMMENT '边际中标利率',
     `multiplier` float(5, 2) DEFAULT NULL COMMENT '中标倍数',
     `mg_multiplier` float(5, 2) DEFAULT NULL COMMENT '边际中标倍数',
@@ -87,7 +87,7 @@ def create_database(cur, table=None):
     `code0` char(15) NOT NULL COMMENT '续发债对应首发债券代码',
     `term` float(4,2) NOT NULL COMMENT '债券期限',
     `delta` float(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率变化',
-    `pdelta` float(7, 4) DEFAULT NULL COMMENT '交易日中债估值净价变化',
+    `dprice` float(7, 4) DEFAULT NULL COMMENT '交易日中债估值净价变化',
     `seq` tinyint NOT NULL COMMENT '交易日顺序',
     primary key(code, seq)   
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '一级发行对应区间的二级市场行情变化'
@@ -173,7 +173,7 @@ class BondYTM(object):
         """类初始化函数，terms代表债券年限，rate表示发行利率，dt0表示发行日期，par表示债券面值，默认100
         freq表示一年附息频次，默认为1"""
         self.terms = terms
-        self.rate = rate
+        self.rate = rate/100
         self.dt0 = dt0
         self.par = par
         self.freq = freq
@@ -187,6 +187,7 @@ class BondYTM(object):
         return t0, ts
 
     def bond_ytm(self, dt: dtt.date, price, guess=0.03):
+        """根据价格计算到期收益率"""
         t0, ts = self.get_ts(dt)
         coup = self.par * self.rate / self.freq
         ytm_func = lambda y: (sum([coup / (1 + y / self.freq) ** t for t in ts]) + self.par / (1 + y / self.freq) **
@@ -196,7 +197,16 @@ class BondYTM(object):
                                        1 + t0 * y / self.freq) - t0 / self.freq * (1 + t0 * y / self.freq) ** (-2) * (
                                        sum([coup / (1 + y / self.freq) ** t for t in ts]) + self.par / (
                                            1 + y / self.freq) ** ts[-1])
-        return optimize.newton(ytm_func, guess, fprime=fprime)
+        return 100 * optimize.newton(ytm_func, guess, fprime=fprime)
+
+    def bond_price(self, dt: dtt.date, rate):
+        """根据到期收益率计算价格，参数中dt表示增发债日期，rate表示到期收益率"""
+        rate = rate/100
+        coup = self.par * self.rate / self.freq
+        t0, ts = self.get_ts(dt)
+        price = (sum([coup / (1 + rate / self.freq) ** t for t in ts]) + self.par / (1 + rate / self.freq) ** ts[-1])\
+                / (1 + t0 * rate / self.freq)
+        return price
 
 
 class ReadExcel(object):
@@ -444,6 +454,23 @@ class Excel2DB(object):
         else:
             self.db.commit()
 
+    def update_price(self):
+        """由appencix1补录的数据（2017/7/29-2017/11/21）缺少price信息，需要自己计算，计算由BondYTM负责"""
+        sql_select = r"""select t1.dt, t1.code, t1.term, t1.rate, t2.dt, t2.code, t2.rate
+        from tb_pri t1 inner join tb_pri t2 on t1.code = concat(left(t2.code, 6), ".IB")
+        where t2.price is null"""
+        data = Data(sql_select, self.cur).data
+        data_update = [[BondYTM(d[2], d[3], d[0]).bond_price(d[4], d[6]), d[5]] for d in data]
+        sql_update = "update tb_pri set price = %s where code = %s"
+        for d in data_update:
+            print(d)
+        try:
+            _ = self.cur.executemany(sql_update, data_update)
+        except:
+            self.db.rollback()
+        else:
+            self.db.commit()
+
 
 class Wind2DB(object):
     """Wind2DB类主要用于从Wind数据库中提取所需数据并写入数据库"""
@@ -554,10 +581,27 @@ class DB2self(object):
           return (100 * (y1-y0));
         end;              
         """
+        sql_imp_dprice = r"""
+        create function imp_dprice(ccode char(15), sseq tinyint)
+        returns float(6, 4)
+        language sql deterministic
+        begin
+          declare p0 float(7, 4);
+          declare p1 float(7, 4);
+          if sseq = 0 then
+            select price into p1 from tb_pri where code = ccode;
+            select net into p0 from tb_sec where code = ccode and seq = 0;
+          else
+            select net into p1 from tb_sec where code = ccode and seq = sseq;
+            select net into p0 from tb_sec where code = ccode and seq = sseq - 1; 
+          end if;
+          return (p1 -p0);
+        end;
+        """
         if funcname:
             self.cur.execute(eval("sql_{}".format(funcname)))
         else:
-            for name in ["imp_delta"]:
+            for name in ["imp_delta", "imp_dprice"]:
                 self.cur.execute(eval("sql_{}".format(name)))
 
     def insert_tb_sec_delta(self):
@@ -565,7 +609,7 @@ class DB2self(object):
         insert into tb_sec_delta(dt, code, code0, term, seq)
         select dt, code, code0, term, seq from tb_sec
         """
-        sql2 = r"""update tb_sec_delta set delta = imp_delta(code, seq)"""
+        sql2 = r"""update tb_sec_delta set delta = imp_delta(code, seq), dprice = imp_dprice(code, seq)"""
         try:
             self.cur.execute(sql1)
             self.cur.execute(sql2)
@@ -592,22 +636,23 @@ class DB2self(object):
 
 
 def main():
-    # data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
-    data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
+    data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
+    # data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
     # w.start()
     create_database(cur)
     # w2db = Wind2DB(db, cur)
     years = range(2013, 2019)
-    e2db = Excel2DB(data_path, db, cur)
-    # db2self = DB2self(db, cur)
+    # e2db = Excel2DB(data_path, db, cur)
+    db2self = DB2self(db, cur)
     try:
-        e2db.insert(years)
+        # e2db.insert(years)
         # e2db.update()
         # e2db.update_mg_rate()
+        # e2db.update_price()
         # w2db.insert("payment")
-        # db2self.create_function("imp_delta")
+        db2self.create_function("imp_dprice")
         # db2self.insert("future_delta")
     finally:
         cur.close()

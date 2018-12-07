@@ -10,14 +10,15 @@ from database import Data
 import statsmodels.api as sm
 
 
-
-def imp_select_code(imp:list, cur):
+def imp_select_code(imp:list, cur, column="delta"):
     res = list()
-    res.append(Data(r"select code from tb_sec_delta where seq=0 and delta <= %s", cur, (imp[0],)).select_col(0))
+    res.append(Data(r"select code from tb_sec_delta where seq=0 and {} <= %s".format(column),
+                    cur, (imp[0],)).select_col(0))
     for i in range(len(imp) - 1):
-        res.append(Data(r"select code from tb_sec_delta where seq=0 and delta > %s and delta <= %s", cur,
-                         (imp[i], imp[i+1])).select_col(0))
-    res.append(Data(r"select code from tb_sec_delta where seq=0 and delta > %s", cur, (imp[-1],)).select_col(0))
+        res.append(Data(r"select code from tb_sec_delta where seq=0 and {} > %s and delta <= %s".format(column),
+                        cur, (imp[i], imp[i+1])).select_col(0))
+    res.append(Data(r"select code from tb_sec_delta where seq=0 and {} > %s".format(column),
+                    cur, (imp[-1],)).select_col(0))
     return res
 
 
@@ -27,28 +28,30 @@ class ImpSat(object):
         self.db = db
         self.cur = cur
 
-    def get_avg_std_by_term(self, terms):
+    def get_avg_std_by_term(self, terms, column="delta"):
         """计算不同期限的发行冲击的均值与标准差"""
         res = []
-        sql = "select count(*), avg(delta), stddev_samp(delta) from tb_sec_delta where seq = 0 and term = %s"
+        sql = "select count(*), avg({0}), stddev_samp({0}) from tb_sec_delta " \
+              "where seq = 0 and term = %s".format(column)
         for t in terms:
             num, avg, std = Data(sql, self.cur, (t,)).data[0]
             res.append([num, avg, std])
         return res
 
-    def imp_hist_avg_std_by_term(self, term):
+    def imp_hist_avg_std_by_term(self, terms):
         """绘制各个期限增发债冲击的双柱形图，分别表示均值和标准差"""
+        columns = []
         data = np.array(self.get_avg_std_by_term(term))
 
 
 
 
 
-    def imp_seq(self, imp: list, seq: list):
+    def imp_seq(self, imp: list, seq: list, column="delta"):
         """返回根据冲击大小与seq先后排序的二维收益率差"""
         res = list()
-        sql = r"""select avg(delta) from tb_sec_delta where code in %s and seq = %s"""
-        codes = imp_select_code(imp, self.cur)
+        sql = r"""select avg({}) from tb_sec_delta where code in %s and seq = %s""".format(column)
+        codes = imp_select_code(imp, self.cur, column=column)
         for code in codes:
             num = len(code)
             d = list([num])
@@ -58,12 +61,24 @@ class ImpSat(object):
         return res
 
     def imp_hist_plot(self):
-        """绘制发行冲击的直方分布图"""
-        imp = np.array(Data(r"select delta from tb_sec_delta where seq = 0 and delta is not null",
-                            self.cur).select_col(0))
-        plt.hist(imp, bins=np.arange(-40, 30, 1), normed=True)
-        plt.title("一级发行冲击分布图", fontproperties="SimHei")
-        plt.show()
+        """绘制发行冲击的直方分布图，分别使用收益率变动与净价变动来衡量"""
+        fig, axes = plt.subplots(1, 2, sharey=True, figsize=(12, 4.8))
+        for column in ["delta", "dprice"]:
+            sql = r"select {0} from tb_sec_delta where seq = 0 and {0} is not null".format(column)
+            imp = np.array(Data(sql, self.cur).select_col(0))
+            if column == "delta":
+                bins = np.arange(-40, 30, 1)
+                i = 0
+                title = "发行冲击(BP)分布图"
+            elif column == "dprice":
+                bins = np.arange(-2, 4, 0.1)
+                i = 1
+                title = "发行冲击(元)分布图"
+            else:
+                raise ValueError("错误的参数值column")
+            axes[i].hist(imp, bins=bins)
+            axes[i].set_title(title, fontproperties="SimHei", fontsize=20)
+        fig.show()
 
     def imp_future(self, imp:list, seq:list, term=10, delta="dsrate"):
         """"发行冲击对国债期货市场影响"""
@@ -129,12 +144,13 @@ def main():
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
     imp_sat = ImpSat(db, cur)
+    imp_sat.imp_hist_plot()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
-    res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=5)
-    for rs in res:
-        print()
-        for r in rs:
-            print(r, end=", ")
+    # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=5)
+    # for rs in res:
+    #     print()
+    #     for r in rs:
+    #         print(r, end=", ")
     # imp_sat.imp_delta_plot()
 
 
