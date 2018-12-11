@@ -38,15 +38,6 @@ class ImpSat(object):
             res.append([num, avg, std])
         return res
 
-    def imp_hist_avg_std_by_term(self, terms):
-        """绘制各个期限增发债冲击的双柱形图，分别表示均值和标准差"""
-        columns = []
-        data = np.array(self.get_avg_std_by_term(term))
-
-
-
-
-
     def imp_seq(self, imp: list, seq: list, column="delta"):
         """返回根据冲击大小与seq先后排序的二维收益率差"""
         res = list()
@@ -62,22 +53,39 @@ class ImpSat(object):
 
     def imp_hist_plot(self):
         """绘制发行冲击的直方分布图，分别使用收益率变动与净价变动来衡量"""
-        fig, axes = plt.subplots(1, 2, sharey=True, figsize=(12, 4.8))
-        for column in ["delta", "dprice"]:
-            sql = r"select {0} from tb_sec_delta where seq = 0 and {0} is not null".format(column)
-            imp = np.array(Data(sql, self.cur).select_col(0))
-            if column == "delta":
-                bins = np.arange(-40, 30, 1)
-                i = 0
-                title = "发行冲击(BP)分布图"
-            elif column == "dprice":
-                bins = np.arange(-2, 4, 0.1)
-                i = 1
-                title = "发行冲击(元)分布图"
-            else:
-                raise ValueError("错误的参数值column")
-            axes[i].hist(imp, bins=bins)
-            axes[i].set_title(title, fontproperties="SimHei", fontsize=20)
+        fig, axes = plt.subplots(2, 2, figsize=(9.6, 4.8))
+        fig.subplots_adjust(hspace=0.5)
+        i = 0
+        for bondtype in ["00", "02"]:
+            j = 0
+            for column in ["delta", "dprice"]:
+                sql = r"""select {0} from tb_sec_delta where seq = 0 and {0} is not null and 
+                           code0 regexp '[:alnum:]{{2}}{1}.*'""".format(column, bondtype)
+                imp = np.array(Data(sql, self.cur).select_col(0))
+                if column == "delta":
+                    if bondtype == "00":
+                        bins = np.arange(-40, 30, 1)
+                        title = "国债发行冲击(BP)分布图"
+                    elif bondtype == "02":
+                        bins = np.arange(-40, 30, 1)
+                        title = "国开债发行冲击(BP)分布图"
+                    else:
+                        raise ValueError("错误的参数值bondtype")
+                elif column == "dprice":
+                    if bondtype == "02":
+                        bins = np.arange(-2, 4, 0.01)
+                        title = "国开债发行冲击(元)分布图"
+                    elif bondtype == "00":
+                        bins = np.arange(-2, 4, 0.01)
+                        title = "国债发行冲击(元)分布图"
+                    else:
+                        raise ValueError("错误的参数值bondtype")
+                else:
+                    raise ValueError("错误的参数值column")
+                axes[i, j].hist(imp, bins=bins)
+                axes[i, j].set_title(title, fontproperties="SimHei", fontsize=20)
+                j += 1
+            i += 1
         fig.show()
 
     def imp_future(self, imp:list, seq:list, term=10, delta="dsrate"):
@@ -138,6 +146,16 @@ class ImpSat(object):
             plt.xlim(*line_x)
             plt.ylim(-7, 7)
         plt.show()
+
+    def imp_and_trend(self):
+        sql = r"""select dt, rate from tb_rate where term = 10 and bond_type ='国债'"""
+        data = Data(sql, self.cur)
+        dt = np.array(data.select_col(0))
+        rate = np.array(data.select_col(1))
+        fig, ax = plt.subplots(1, 1, figsize=(12, 4))
+        ax.plot(dt, rate)
+        fig.show()
+
 
 
 def main():
