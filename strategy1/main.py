@@ -149,23 +149,43 @@ class ImpSat(object):
         plt.show()
 
     def imp_and_trend(self):
-        sql1 = r"""select dt, rate from tb_rate where term = 10 and bond_type ='国债'"""
-        data = Data(sql1, self.cur)
-        dt = np.array(data.select_col(0))
-        rate = np.array(data.select_col(1))
-        fig, axes = plt.subplots(1, 1, figsize=(12, 3), sharex=True)
-        axes.spines["top"].set_color('none')
-        axes.spines["right"].set_color("none")
-        axes.xaxis.set_ticks_position("bottom")
-        axes.yaxis.set_ticks_position("left")
-        axes.spines["bottom"].set_position(('data', 3))
-        axes.spines["left"].set_position(('outward', 0))
-        axes.plot(dt, rate)
+        sql0 = r"""select dt, rate from tb_rate where term = 10 and bond_type ='国债'"""
+        data0 = Data(sql0, self.cur)
+        dt = np.array(data0.select_col(0))
+        rate = np.array(data0.select_col(1))
+        fig, axes = plt.subplots(3, 1, figsize=(12, 6), sharex="all", gridspec_kw={'height_ratios': [3, 1.5, 1.5]})
+        # 图1，十年国债到期收益率
+        axes[0].spines["top"].set_color('none')
+        axes[0].spines["right"].set_color("none")
+        axes[0].xaxis.set_ticks_position("bottom")
+        axes[0].yaxis.set_ticks_position("left")
+        axes[0].plot(dt, rate, label="十年国债收益率")
+        axes[0].spines["bottom"].set_position(('data', 3))
+        axes[0].legend(fontsize=15)
+        # 图2，国债发行冲击
+        sql1 = r"""select dt, delta from tb_sec_delta where code0 regexp '[:alnum:]{2}00.*' and term >=3"""
+        data1 = Data(sql1, self.cur)
+        dt1 = np.array(data1.select_col(0))
+        delta1 = np.array(data1.select_col(1))
+        axes[1].bar(dt1, delta1, label="续发国债冲击（BP)")
+        axes[1].set_ylim(-10, 10)
+        axes[1].legend(fontsize=10, loc="upper left")
+        # 图3，国开债发行冲击
+        sql2 = r"""select dt, delta from tb_sec_delta 
+        where code0 regexp '[:alnum:]{2}02.*' and term = 10
+        and delta is not null"""
+        data2 = Data(sql2, self.cur)
+        dt2 = np.array(data2.select_col(0))
+        delta2 = np.array(data2.select_col(1))
+        axes[2].bar(dt2, delta2, label="续发国开债冲击（BP）")
+        axes[2].set_ylim(-10, 10)
+        axes[2].legend(fontsize=10, loc="upper left")
         fig.show()
 
 
 def main():
     mpl.rcParams['font.sans-serif'] = ['SimHei']
+    plt.rcParams['axes.unicode_minus'] = False
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
     imp_sat = ImpSat(db, cur)

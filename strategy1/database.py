@@ -553,17 +553,25 @@ class Wind2DB(object):
         data = [(d,) for d in list(zip(wdata.Codes, wdata.Data[0], wdata.Data[1]))]
         return data
 
-    def get_data_money(self, dt1=dtt.date(2013, 1, 1), dt2=dtt.date(2018, 10, 22),
-                       codes=("FR007.IR", "SHIBOR3M.IR")):
+    @staticmethod
+    def get_data_money(dt1=dtt.date(2013, 1, 1), dt2=dtt.date(2018, 10, 22),
+                       codes=("FR007.IR", "SHIBOR3M.IR", "SHIBORON.IR")):
         """从Wind提取货币市场利率数据"""
-
+        res = []
+        data = w.wsd(codes, "close", dt1, dt2, "TradingCalendar=NIB")
+        for i in range(len(data.Codes)):
+            code = data.Codes[i]
+            for j in range(len(data.Times)):
+                d = None if math.isnan(data.Data[i][j]) else data.Data[i][j]
+                res.append(([data.Times[j], code, d],))
+        return res
 
     def insert(self, table=None):
         if table:
             data = eval("self.get_data_{}()".format(table))
             self.cur.executemany(r"insert into {} values %s".format(table), data)
         else:
-            for t in ["tb_sec", "tb_rate", "future", "payment"]:
+            for t in ["tb_sec", "tb_rate", "future", "payment", "money"]:
                 data = eval("self.get_data_{}()".format(t))
                 self.cur.executemany(r"insert into {} values %s".format(t), data)
         self.db.commit()
@@ -649,14 +657,14 @@ class DB2self(object):
 
 
 def main():
-    data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
+    # data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
     # data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
-    # w.start()
-    create_database(cur)
-    # w2db = Wind2DB(db, cur)
-    years = range(2013, 2019)
+    w.start()
+    create_database(cur, "money")
+    w2db = Wind2DB(db, cur)
+    # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
     db2self = DB2self(db, cur)
     try:
@@ -664,8 +672,8 @@ def main():
         # e2db.update()
         # e2db.update_mg_rate()
         # e2db.update_price()
-        # w2db.insert("payment")
-        db2self.create_function("imp_dprice")
+        w2db.insert("money")
+        # db2self.create_function("imp_dprice")
         # db2self.insert("future_delta")
     finally:
         cur.close()
