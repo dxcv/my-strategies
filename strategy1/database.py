@@ -112,9 +112,17 @@ def create_database(cur, table=None):
     CONSTRAINT pk PRIMARY KEY(`code`)
     )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '债券付息日与付息额'
     """
+    sql_money = r"""
+    CREATE TABLE IF NOT EXISTS money(
+    `dt` DATE NOT NULL COMMENT '交易日期',
+    `code` CHAR(15) NOT NULL COMMENT '交易品种代码',
+    `rate` FLOAT(7, 4) DEFAULT NULL COMMENT '收益率',
+    CONSTRAINT pk PRIMARY KEY(`dt`, `code`)
+    )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '货币市场利率'
+    """
     if table is None:
         for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta, sql_future_delta,
-                    sql_payment]:
+                    sql_payment, sql_money]:
             _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
@@ -544,6 +552,11 @@ class Wind2DB(object):
         wdata = w.wss(codes, "maturitydate,couponrate", "N=0")
         data = [(d,) for d in list(zip(wdata.Codes, wdata.Data[0], wdata.Data[1]))]
         return data
+
+    def get_data_money(self, dt1=dtt.date(2013, 1, 1), dt2=dtt.date(2018, 10, 22),
+                       codes=("FR007.IR", "SHIBOR3M.IR")):
+        """从Wind提取货币市场利率数据"""
+
 
     def insert(self, table=None):
         if table:

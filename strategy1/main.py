@@ -8,6 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from database import Data
 import statsmodels.api as sm
+from pylab import mpl
 
 
 def imp_select_code(imp:list, cur, column="delta"):
@@ -148,21 +149,27 @@ class ImpSat(object):
         plt.show()
 
     def imp_and_trend(self):
-        sql = r"""select dt, rate from tb_rate where term = 10 and bond_type ='国债'"""
-        data = Data(sql, self.cur)
+        sql1 = r"""select dt, rate from tb_rate where term = 10 and bond_type ='国债'"""
+        data = Data(sql1, self.cur)
         dt = np.array(data.select_col(0))
         rate = np.array(data.select_col(1))
-        fig, ax = plt.subplots(1, 1, figsize=(12, 4))
-        ax.plot(dt, rate)
+        fig, axes = plt.subplots(1, 1, figsize=(12, 3), sharex=True)
+        axes.spines["top"].set_color('none')
+        axes.spines["right"].set_color("none")
+        axes.xaxis.set_ticks_position("bottom")
+        axes.yaxis.set_ticks_position("left")
+        axes.spines["bottom"].set_position(('data', 3))
+        axes.spines["left"].set_position(('outward', 0))
+        axes.plot(dt, rate)
         fig.show()
 
 
-
 def main():
+    mpl.rcParams['font.sans-serif'] = ['SimHei']
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
     imp_sat = ImpSat(db, cur)
-    imp_sat.imp_hist_plot()
+    imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
     # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=5)
     # for rs in res:
