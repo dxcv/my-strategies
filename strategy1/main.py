@@ -189,13 +189,13 @@ def main():
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
     imp_sat = ImpSat(db, cur)
-    imp_sat.imp_and_trend()
+    # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
-    # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=5)
-    # for rs in res:
-    #     print()
-    #     for r in rs:
-    #         print(r, end=", ")
+    res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
+    for rs in res:
+        print()
+        for r in rs:
+            print(r, end=", ")
     # imp_sat.imp_delta_plot()
 
 

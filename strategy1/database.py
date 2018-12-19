@@ -120,9 +120,17 @@ def create_database(cur, table=None):
     CONSTRAINT pk PRIMARY KEY(`dt`, `code`)
     )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '货币市场利率'
     """
+    sql_future_minute = """
+    CREATE TABLE IF NOT EXISTS future_minute(
+    `dtt` DATETIME NOT NULL COMMENT '交易时间',
+    `term` TINYINT NOT NULL COMMENT '交易品种期限',
+    `close` FLOAT(7, 4) DEFAULT NULL COMMENT '收盘价',
+    CONSTRAINT pk PRIMARY KEY(`dtt`, `term`)
+    )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '国债期货价格5分钟序列'
+    """
     if table is None:
         for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta, sql_future_delta,
-                    sql_payment, sql_money]:
+                    sql_payment, sql_money, sql_future_minute]:
             _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
@@ -566,12 +574,32 @@ class Wind2DB(object):
                 res.append(([data.Times[j], code, d],))
         return res
 
+    @staticmethod
+    def get_data_future_minute(codes=("TF.CFE", "T.CFE"), barsize=5,
+                               dt=dtt.datetime(2018, 10, 22, 15, 16, 00)):
+        """从Wind提取分钟序列"""
+        res = list()
+        for code in codes:
+            if code == "T.CFE":
+                dt1 = dtt.datetime(2013, 9, 6, 9, 15, 00)
+                term = 10
+            elif code == "TF.CFE":
+                dt1 = dtt.datetime(2015, 3, 20, 9, 15, 00)
+                term = 5
+            else:
+                raise ValueError("错误的codes参数类型")
+            BarSize = "BarSize={}".format(barsize)
+            wdata = w.wsi(code, "close", dt1, dt, BarSize)
+            data = [([d[0], term, d[1]],) for d in zip(wdata.Times, wdata.Data[0])]
+            res.extend(data)
+        return res
+
     def insert(self, table=None):
         if table:
             data = eval("self.get_data_{}()".format(table))
             self.cur.executemany(r"insert into {} values %s".format(table), data)
         else:
-            for t in ["tb_sec", "tb_rate", "future", "payment", "money"]:
+            for t in ["tb_sec", "tb_rate", "future", "payment", "money", "future_minute"]:
                 data = eval("self.get_data_{}()".format(t))
                 self.cur.executemany(r"insert into {} values %s".format(t), data)
         self.db.commit()
@@ -662,7 +690,7 @@ def main():
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
     w.start()
-    create_database(cur, "money")
+    create_database(cur, "future_minute")
     w2db = Wind2DB(db, cur)
     # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
@@ -672,7 +700,7 @@ def main():
         # e2db.update()
         # e2db.update_mg_rate()
         # e2db.update_price()
-        w2db.insert("money")
+        w2db.insert("future_minute")
         # db2self.create_function("imp_dprice")
         # db2self.insert("future_delta")
     finally:
