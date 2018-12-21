@@ -4,6 +4,7 @@
 
 import pymysql
 import numpy as np
+from numpy import random as nr
 import pandas as pd
 from scipy import optimize
 import datetime as dtt
@@ -140,21 +141,71 @@ class IrsModel(object):
         It = self.receive_X(Xt)
         self.It2Rt(It)
 
-    def estimate_B(self, R0, sample):
+    def estimate_B(self, R0, sample, inplace=True):
         """estimate_B方法用于估计参数矩阵，首先根据最小二乘法构建目标函数，目标函数是一个多元二次函数，可使用牛顿迭代法
         来计算最小值，参数R0表示初始利率值，sample表示样本，即历史的价格信息流，{Xt}的时间序列"""
         self.R = R0 # 用初始值重置R
+
         def f(x, sample):
             res = 0
-            B = self.B_Matrix(x)
+            self.B = self.B_Matrix(x)
             for X in sample:
                 I = self.receive_X(X)
                 self.It2Rt(I)
                 res += I.T * I[0, 0]
             return res
 
+        x0 = np.ones(self.N * (self.N - 1))
+        res = optimize.fmin_bfgs(f, x0, args=(sample,))
+        if inplace:
+            self.B = res[0]
+        return res
 
 
+class Test(object):
+    """Test类用于对IrsModel的有效性进行测试，两种方法分别是基于蒙特卡洛模拟以及基于历史数据的回测，Test类接受一个IrsModel类进行初始化"""
+
+    def __init__(self, irsmodel):
+        self.im = irsmodel
+        self.n = self.im.N
+
+    def term_rand(self, size, p):
+        """按照指定概率生成期限的索引，term_index指不同期限的利率互换在价格序列中的索引位置，p是指不同期限品种利率互换出现价格信息的概率，
+        例如1Y与5Y成交报价更为频繁，相应的概率也应该更高"""
+        index_range = range(self.n)
+        res = nr.choice(index_range, size=size, p=p)
+        return res
+
+    def generate_sample(self, num, p, R0):
+        """generate_sample方法用于生成模拟的价格信息时间序列{Xt}，假定价格信息是随机游走序列，并且随机反映在某个期限品种的成交或报价上
+        ，也就是说模拟价格过程有两个随机因素，一个是价格变动是一个正态分布，另一个是这一价格变动呈现在一个随机的品种上，参数num表示样
+        本点个数，参数p为不同期限出现价格信息的概率，参数R0为利率初始值"""
+        indexes = self.term_rand(num, p)
+        Is = 0.1 * nr.randn(num)
+        sample = []
+        self.im.reset_R(R0)
+        for i, s in zip(indexes, Is):
+            I = np.matrix(np.zeros(self.n)).T
+            I[i, 0] = s
+            R = self.im.It2Rt(I, output=True)
+            X = np.zeros(self.n)
+            X[i] = R[i, 0]
+            sample.append(X)
+        return sample
+
+
+def main():
+    im = IrsModel(5)
+    B = im.B_Matrix(nr.rand(25))
+    im.B = B
+    R0 = np.matrix([2.5, 2.6, 2.7, 2.8, 2.9]).T
+    test = Test(im)
+    sample = test.generate_sample(500, [0.4, 0.2, 0.1, 0.05, 0.25], R0)
+    im.estimate_B(R0, sample)
+
+
+if __name__ == "__main__":
+    main()
 
 
 
