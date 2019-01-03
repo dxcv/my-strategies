@@ -163,7 +163,7 @@ class ImpSat(object):
         axes[0].spines["bottom"].set_position(('data', 3))
         axes[0].legend(fontsize=15)
         # 图2，国债发行冲击
-        sql1 = r"""select dt, delta from tb_sec_delta where code0 regexp '[:alnum:]{2}00.*' and term >=3"""
+        sql1 = r"""select dt, delta from tb_sec_delta where code regexp '[:alnum:]{2}00.*' and seq = 0"""
         data1 = Data(sql1, self.cur)
         dt1 = np.array(data1.select_col(0))
         delta1 = np.array(data1.select_col(1))
@@ -172,7 +172,7 @@ class ImpSat(object):
         axes[1].legend(fontsize=10, loc="upper left")
         # 图3，国开债发行冲击
         sql2 = r"""select dt, delta from tb_sec_delta 
-        where code0 regexp '[:alnum:]{2}02.*' and term = 10
+        where code regexp '[:alnum:]{2}02.*' and seq = 0
         and delta is not null"""
         data2 = Data(sql2, self.cur)
         dt2 = np.array(data2.select_col(0))
@@ -189,13 +189,13 @@ def main():
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
     imp_sat = ImpSat(db, cur)
-    # imp_sat.imp_and_trend()
+    imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
-    res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
-    for rs in res:
-        print()
-        for r in rs:
-            print(r, end=", ")
+    # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
+    # for rs in res:
+    #     print()
+    #     for r in rs:
+    #         print(r, end=", ")
     # imp_sat.imp_delta_plot()
 
 
