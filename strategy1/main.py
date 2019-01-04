@@ -178,7 +178,7 @@ class ImpSat(object):
         dt2 = np.array(data2.select_col(0))
         delta2 = np.array(data2.select_col(1))
         axes[2].bar(dt2, delta2, label="续发国开债冲击（BP）")
-        axes[2].set_ylim(-10, 10)
+        axes[2].set_ylim(-20, 10)
         axes[2].legend(fontsize=10, loc="upper left")
         fig.show()
 
