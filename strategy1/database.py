@@ -125,6 +125,8 @@ def create_database(cur, table=None):
     `dtt` DATETIME NOT NULL COMMENT '交易时间',
     `term` TINYINT NOT NULL COMMENT '交易品种期限',
     `close` FLOAT(7, 4) DEFAULT NULL COMMENT '收盘价',
+    `rate` FLOAT(6, 4) DEFAULT NULL COMMENT '收盘价对应的收益率',
+    `seq` tinyint NOT NULL COMMENT '顺序',
     CONSTRAINT pk PRIMARY KEY(`dtt`, `term`)
     )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '国债期货价格5分钟序列'
     """
@@ -590,7 +592,13 @@ class Wind2DB(object):
                 raise ValueError("错误的codes参数类型")
             BarSize = "BarSize={}".format(barsize)
             wdata = w.wsi(code, "close", dt1, dt, BarSize)
-            data = [([d[0], term, d[1]],) for d in zip(wdata.Times, wdata.Data[0])]
+            seq = 0
+            data = []
+            for d in zip(wdata.Times, wdata.Data[0]):
+                data.append(([d[0], term, d[1], p2y_future(d[1], term), seq],))
+                seq += 1
+                if seq == 54:
+                    seq = 0
             res.extend(data)
         return res
 

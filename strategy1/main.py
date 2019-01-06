@@ -183,19 +183,67 @@ class ImpSat(object):
         fig.show()
 
 
+class ImpFuture(object):
+    """用于统计发行冲击后的国债期货表现"""
+
+    def __init__(self, cur, db):
+        self.cur = cur
+        self.db = db
+
+    def imp_days(self, bond_type, future_type):
+        """将发行冲击五等分，计算之后4日的国债期货收益均值，参数bond_type为续发债类型，分别为
+        国债和国开债，future_type为国债期货合约类型("TF"或者"T")"""
+        if bond_type == "国债":
+            bondtype = "00"
+        elif bond_type == "国开债":
+            bondtype = "02"
+        else:
+            raise ValueError("不被接受的参数值bond_type")
+        if future_type == "TF":
+            future_term = 5
+        elif future_type == "T":
+            future_term = 10
+        else:
+            raise ValueError("不被接受的参数值future_type")
+        sql1 = """select t1.delta, t2.dsrate, t3.dsrate, t4.dsrate, t5.dsrate
+        from tb_sec_delta t1 inner join future_delta t2 inner join future_delta t3
+        inner join future_delta t4 inner join future_delta t5
+        on t1.dt = t2.dt and t3.seq = t2.seq + 1 and t4.seq = t3.seq+1 and t5.seq = t4.seq+1
+        and t3.term = t2.term and t4.term = t3.term and t5.term = t4.term
+        where t1.seq = 0 and t1.code regexp '[:alnum:]{{2}}{}.*' and t2.term = %s
+        order by t1.delta
+        """.format(bondtype)
+        data = Data(sql1, self.cur, (future_term,)).data
+        data = pd.DataFrame(np.array(data), columns=["delta", "first", "second", "third", "fourth"])
+        # 依据delta将data五等分
+        n = 5
+        res = []
+        l = int(len(data) / n)
+        for i in range(n):
+            a = i * l
+            b = (i + 1) * l - 1
+            if i == 4:
+                b = -1
+            d = list(data[a:b].mean())
+            d.insert(1, len(data[a:b]))
+            res.append(d)
+        return res
+
 def main():
     mpl.rcParams['font.sans-serif'] = ['SimHei']
     plt.rcParams['axes.unicode_minus'] = False
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
-    imp_sat = ImpSat(db, cur)
-    imp_sat.imp_and_trend()
+    imp_future = ImpFuture(cur, db)
+    res = imp_future.imp_days("国开债", "T")
+    # imp_sat = ImpSat(db, cur)
+    # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
     # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
-    # for rs in res:
-    #     print()
-    #     for r in rs:
-    #         print(r, end=", ")
+    for rs in res:
+        print()
+        for r in rs:
+            print(round(r, 4), end=" ")
     # imp_sat.imp_delta_plot()
 
 
