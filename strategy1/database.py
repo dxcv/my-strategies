@@ -130,9 +130,34 @@ def create_database(cur, table=None):
     CONSTRAINT pk PRIMARY KEY(`dtt`, `term`)
     )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '国债期货价格5分钟序列'
     """
+    sql_dts1 = """
+    CREATE TABLE IF NOT EXISTS dts1(
+    `dt` DATE NOT NULL COMMENT '交易所交易日期',
+    `seq` INT NOT NULL COMMENT '日期顺序',
+    CONSTRAINT pk PRIMARY KEY(`dt`)
+    )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '交易所交易日序列'
+    """
+    sql_dts2 = """
+    CREATE TABLE IF NOT EXISTS dts2(
+    `dt` DATE NOT NULL COMMENT '银行间交易日期',
+    `seq` INT NOT NULL COMMENT '日期顺序',
+    CONSTRAINT pk PRIMARY KEY(`dt`)
+    )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '银行间交易日序列'
+    """
+    sql_impact = """
+    CREATE TABLE IF NOT EXISTS impact(
+    `dt` CHAR NOT NULL COMMENT '日期',
+    `code` CHAR(15) NOT NULL COMMENT '续发债券代码',
+    `code0` CHAR(15) NOT NULL COMMENT '续发债对应首发债券代码',
+    `term` FLOAT(4,2) NOT NULL COMMENT '债券期限',
+    `delta` FLOAT(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率变化',
+    `bondtype` CHAR(10) COMMENT '债券类型',
+    primary key(code)
+    )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '发行冲击'
+    """
     if table is None:
         for sql in [sql_tb_pri, sql_appendix1, sql_tb_sec, sql_tb_rate, sql_future, sql_tb_sec_delta, sql_future_delta,
-                    sql_payment, sql_money, sql_future_minute]:
+                    sql_payment, sql_money, sql_future_minute, sql_dts1, sql_dts2]:
             _ = cur.execute(sql)
     else:
         _ = cur.execute(eval("sql_{}".format(table)))
@@ -602,12 +627,30 @@ class Wind2DB(object):
             res.extend(data)
         return res
 
+    @staticmethod
+    def get_data_dts1(dt1="2013-1-1", dt2="2018-10-22"):
+        """从Wind提取交易所的交易日序列"""
+        wdata = w.tdays(dt1, dt2, "")
+        d = wdata.Data[0]
+        n = len(d)
+        data = [([d[i].date(), i],) for i in range(n)]
+        return data
+
+    @staticmethod
+    def get_data_dts2(dt1="2013-1-1", dt2="2018-10-22"):
+        """从Wind提取银行间的交易日序列"""
+        wdata = w.tdays(dt1, dt2, "TradingCalendar=NIB")
+        d = wdata.Data[0]
+        n = len(d)
+        data = [([d[i].date(), i],) for i in range(n)]
+        return data
+
     def insert(self, table=None):
         if table:
             data = eval("self.get_data_{}()".format(table))
             self.cur.executemany(r"insert into {} values %s".format(table), data)
         else:
-            for t in ["tb_sec", "tb_rate", "future", "payment", "money", "future_minute"]:
+            for t in ["tb_sec", "tb_rate", "future", "payment", "money", "future_minute", "dts1", "dts2"]:
                 data = eval("self.get_data_{}()".format(t))
                 self.cur.executemany(r"insert into {} values %s".format(t), data)
         self.db.commit()
@@ -683,6 +726,9 @@ class DB2self(object):
         from future t1 inner join future t2 on t1.term = t2.term and t1.seq= t2.seq+1"""
         self.cur.execute(sql)
 
+    def insert_impact(self):
+        """向数据库中的impact表插入数据"""
+
     def insert(self, table=None):
         if table:
             eval(r"self.insert_{}()".format(table))
@@ -698,22 +744,22 @@ def main():
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
     w.start()
-    create_database(cur, "future_minute")
-    w2db = Wind2DB(db, cur)
+    create_database(cur, "impact")
+    # w2db = Wind2DB(db, cur)
     # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
-    db2self = DB2self(db, cur)
-    try:
-        # e2db.insert(years)
-        # e2db.update()
-        # e2db.update_mg_rate()
-        # e2db.update_price()
-        w2db.insert("future_minute")
-        # db2self.create_function("imp_dprice")
-        # db2self.insert("future_delta")
-    finally:
-        cur.close()
-        db.close()
+    # db2self = DB2self(db, cur)
+    # try:
+    #     # e2db.insert(years)
+    #     # e2db.update()
+    #     # e2db.update_mg_rate()
+    #     # e2db.update_price()
+    #     # w2db.insert("dts2")
+    #     # db2self.create_function("imp_dprice")
+    #     # db2self.insert("future_delta")
+    # finally:
+    #     cur.close()
+    #     db.close()
 
 
 if __name__ == "__main__":

@@ -310,7 +310,7 @@ def main():
     cur = db.cursor()
     imp_future = ImpFuture(cur, db)
     # res = imp_future.imp_days("国开债", "T")
-    imp_future.imp_minutes_plot(1)
+    imp_future.imp_minutes_plot(0)
     # imp_sat = ImpSat(db, cur)
     # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
