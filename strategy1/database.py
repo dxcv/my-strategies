@@ -146,7 +146,7 @@ def create_database(cur, table=None):
     """
     sql_impact = """
     CREATE TABLE IF NOT EXISTS impact(
-    `dt` CHAR NOT NULL COMMENT '日期',
+    `dt` DATE NOT NULL COMMENT  '日期',
     `code` CHAR(15) NOT NULL COMMENT '续发债券代码',
     `code0` CHAR(15) NOT NULL COMMENT '续发债对应首发债券代码',
     `term` FLOAT(4,2) NOT NULL COMMENT '债券期限',
@@ -728,12 +728,19 @@ class DB2self(object):
 
     def insert_impact(self):
         """向数据库中的impact表插入数据"""
+        sql = """
+        insert into impact
+        select t1.dt, t1.code, t2.code0, t1.term, t1.mg_rate-t2.yield, t1.bond_type
+        from tb_pri t1 inner join tb_sec t2
+        on t1.code = t2.code and t2.seq = 0
+        """
+        self.cur.execute(sql)
 
     def insert(self, table=None):
         if table:
             eval(r"self.insert_{}()".format(table))
         else:
-            for t in ["tb_sec_delta", "future_delta"]:
+            for t in ["tb_sec_delta", "future_delta", "impact"]:
                 eval(r"self.insert_{}()".format(t))
         self.db.commit()
 
@@ -743,23 +750,23 @@ def main():
     # data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
-    w.start()
+    # w.start()
     create_database(cur, "impact")
     # w2db = Wind2DB(db, cur)
     # years = range(2013, 2019)
     # e2db = Excel2DB(data_path, db, cur)
-    # db2self = DB2self(db, cur)
-    # try:
-    #     # e2db.insert(years)
-    #     # e2db.update()
-    #     # e2db.update_mg_rate()
-    #     # e2db.update_price()
-    #     # w2db.insert("dts2")
-    #     # db2self.create_function("imp_dprice")
-    #     # db2self.insert("future_delta")
-    # finally:
-    #     cur.close()
-    #     db.close()
+    db2self = DB2self(db, cur)
+    try:
+        # e2db.insert(years)
+        # e2db.update()
+        # e2db.update_mg_rate()
+        # e2db.update_price()
+        # w2db.insert("dts2")
+        # db2self.create_function("imp_dprice")
+        db2self.insert("impact")
+    finally:
+        cur.close()
+        db.close()
 
 
 if __name__ == "__main__":

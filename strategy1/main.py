@@ -194,28 +194,24 @@ class ImpFuture(object):
     def imp_days(self, bond_type, future_type):
         """将发行冲击五等分，计算之后4日的国债期货收益均值，参数bond_type为续发债类型，分别为
         国债和国开债，future_type为国债期货合约类型("TF"或者"T")"""
-        if bond_type == "国债":
-            bondtype = "00"
-        elif bond_type == "国开债":
-            bondtype = "02"
-        else:
-            raise ValueError("不被接受的参数值bond_type")
         if future_type == "TF":
             future_term = 5
         elif future_type == "T":
             future_term = 10
         else:
             raise ValueError("不被接受的参数值future_term")
-        sql1 = """select t1.delta, t2.dsrate, t3.dsrate, t4.dsrate, t5.dsrate
-        from tb_sec_delta t1 inner join future_delta t2 inner join future_delta t3
-        inner join future_delta t4 inner join future_delta t5
-        on t1.dt = t2.dt and t3.seq = t2.seq + 1 and t4.seq = t3.seq+1 and t5.seq = t4.seq+1
-        and t3.term = t2.term and t4.term = t3.term and t5.term = t4.term
-        where t1.seq = 0 and t1.code regexp '[:alnum:]{{2}}{}.*' and t2.term = %s
+        sql1 = """select t1.delta, t2.dsrate, t3.dsrate, t4.dsrate, t5.dsrate, t6.dsrate, t7.dsrate, t8.dsrate
+        from impact t1 inner join future_delta t2 inner join future_delta t3 inner join future_delta t4
+        inner join future_delta t5 inner join future_delta t6 inner join future_delta t7 inner join future_delta t8
+        on t1.dt = t5.dt and t2.seq = t5.seq - 3 and t3.seq = t5.seq - 2 and t4.seq = t5.seq - 1
+        and t6.seq = t5.seq+1 and t7.seq = t5.seq+2 and t8.seq = t5.seq +3
+        and t2.term = t5.term and t3.term = t5.term and t4.term = t5.term and t6.term = t5.term  
+        and t7.term = t5.term and t8.term = t5.term
+        and t1.bondtype = %s and t5.term = %s
         order by t1.delta
-        """.format(bondtype)
-        data = Data(sql1, self.cur, (future_term,)).data
-        data = pd.DataFrame(np.array(data), columns=["delta", "first", "second", "third", "fourth"])
+        """
+        data = Data(sql1, self.cur, (bond_type, future_term)).data
+        data = pd.DataFrame(np.array(data))
         # 依据delta将data五等分
         n = 5
         res = []
@@ -232,12 +228,6 @@ class ImpFuture(object):
 
     def imp_minutes(self, bond_type, future_type, day=0):
         """计算发行冲击当日的五分钟级的市场走势"""
-        if bond_type == "国债":
-            bondtype = "00"
-        elif bond_type == "国开债":
-            bondtype = "02"
-        else:
-            raise ValueError("不被接受的参数值bond_type")
         if future_type == "TF":
             future_term = 5
         elif future_type == "T":
@@ -245,11 +235,11 @@ class ImpFuture(object):
         else:
             raise ValueError("不被接受的参数值future_type")
         # 获得delta五等分点
-        sql1 = """select t1.delta from tb_sec_delta t1 inner join future_minute t2
-                  on t1.dt = date(t2.dtt) and t1.seq=0 and t2.seq=0
-                  where t1.code regexp '[:alnum:]{{2}}{}.*' and t2.term = %s
-                  """.format(bondtype)
-        delta = np.array(Data(sql1, self.cur, (future_term,)).data)
+        sql1 = """select t1.delta from impact t1 inner join future_minute t2
+                  on t1.dt = date(t2.dtt) and t2.seq=0
+                  where t1.bondtype = %s and t2.term = %s
+                  """
+        delta = np.array(Data(sql1, self.cur, (bond_type, future_term)).data)
         delta = pd.DataFrame(delta, columns=["delta"]).dropna()
         per_delta = [float(delta.min()-1)]
         for p in range(20, 120, 20):
@@ -257,21 +247,29 @@ class ImpFuture(object):
         # 根据五等分点（per_delta)从数据库中选出每个分位的
         data = []
         if day == 0:
-            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from tb_sec_delta t1 
+            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from impact t1 
             inner join future_minute t2
-            on t1.dt = date(t2.dtt) and t1.seq=0
-            where t1.code regexp '[:alnum:]{{2}}{}.*' and t2.term = %s and t1.delta > %s and t1.delta < %s
-            group by date_format(t2.dtt, '%%H:%%i')""".format(bondtype)
-        elif day == 1:
-            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from tb_sec_delta t1 
-                    inner join future_minute t2 inner join future t3 inner join future t4
-                    on t1.dt = t3.dt and t1.seq=0 and t4.seq = t3.seq +1 and t4.dt = date(t2.dtt)
-                    where t1.code regexp '[:alnum:]{{2}}{}.*' and t2.term = %s and t1.delta > %s and t1.delta < %s
-                    group by date_format(t2.dtt, '%%H:%%i')""".format(bondtype)
+            on t1.dt = date(t2.dtt) and t1.bondtype = %s and t2.term = %s 
+            and t1.delta > %s and t1.delta <= %s
+            group by date_format(t2.dtt, '%%H:%%i')"""
+        elif day > 0:
+            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from impact t1 
+            inner join future_minute t2 inner join dts1 t3 inner join dts1 t4
+            on t1.dt = t3.dt and t4.seq = t3.seq +{} and t4.dt = date(t2.dtt)
+            where t1.bondtype = %s and t2.term = %s and t1.delta > %s and t1.delta <= %s
+            group by date_format(t2.dtt, '%%H:%%i')
+            """.format(day)
+        else:
+            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from impact t1 
+            inner join future_minute t2 inner join dts1 t3 inner join dts1 t4
+            on t1.dt = t3.dt and t4.seq = t3.seq - {} and t4.dt = date(t2.dtt)
+            where t1.bondtype = %s and t2.term = %s and t1.delta > %s and t1.delta <= %s
+            group by date_format(t2.dtt, '%%H:%%i')
+            """.format(abs(day))
         for i in range(len(per_delta)-1):
             a = per_delta[i]
             b = per_delta[i+1]
-            da = Data(sql2, self.cur, (future_term, a, b))
+            da = Data(sql2, self.cur, (bond_type, future_term, a, b))
             time_index = da.select_col(0)
             rate = da.select_col(1)
             data.append(rate)
@@ -309,16 +307,16 @@ def main():
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
     imp_future = ImpFuture(cur, db)
-    # res = imp_future.imp_days("国开债", "T")
-    imp_future.imp_minutes_plot(0)
+    res = imp_future.imp_days("国债", "TF")
+    # imp_future.imp_minutes_plot(3)
     # imp_sat = ImpSat(db, cur)
     # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
     # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
-    # for rs in res:
-    #     print()
-    #     for r in rs:
-    #         print(round(r, 4), end=" ")
+    for rs in res:
+        print()
+        for r in rs:
+            print(round(r, 4), end=" ")
     # imp_sat.imp_delta_plot()
 
 
