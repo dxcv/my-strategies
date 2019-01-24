@@ -147,12 +147,12 @@ def create_database(cur, table=None):
     sql_impact = """
     CREATE TABLE IF NOT EXISTS impact(
     `dt` DATE NOT NULL COMMENT  '日期',
-    `code` CHAR(15) NOT NULL COMMENT '续发债券代码',
+    `code` CHAR(15) NOT NULL COMMENT '续发债券代码' PRIMARY KEY,
     `code0` CHAR(15) NOT NULL COMMENT '续发债对应首发债券代码',
     `term` FLOAT(4,2) NOT NULL COMMENT '债券期限',
-    `delta` FLOAT(7,4) DEFAULT NULL COMMENT '交易日中债估值收益率变化',
-    `bondtype` CHAR(10) COMMENT '债券类型',
-    primary key(code)
+    `delta` FLOAT(7,4) DEFAULT NULL COMMENT '发行冲击（BP）',
+    `dprice` FLOAT(5, 2) DEFAULT NULL COMMENT '发行冲击（元）',
+    `bondtype` CHAR(10) DEFAULT NULL COMMENT '债券类型'
     )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '发行冲击'
     """
     if table is None:
@@ -728,13 +728,30 @@ class DB2self(object):
 
     def insert_impact(self):
         """向数据库中的impact表插入数据"""
-        sql = """
-        insert into impact
-        select t1.dt, t1.code, t2.code0, t1.term, t1.mg_rate-t2.yield, t1.bond_type
-        from tb_pri t1 inner join tb_sec t2
-        on t1.code = t2.code and t2.seq = 0
+        sql1 = """
+        select t1.dt, t3.dt, t1.code, t2.code0, t1.term, t3.rate, t1.mg_rate, t2.yield, t2.net, t1.bond_type
+        from tb_pri t1 inner join tb_sec t2 inner join tb_pri t3
+        on t1.code = t2.code and t2.seq = 0 and t3.code = t2.code0
+        and t1.bond_type = '国债'
         """
-        self.cur.execute(sql)
+        data1 = Data(sql1, self.cur).data
+        data = []
+        for d in data1:
+            if d[6] is None:
+                continue
+            bond = BondYTM(d[4], d[5], d[1])
+            price = bond.bond_price(d[0], d[6])
+            if d[4] in [3]:
+                a = 0.05  # 2年期国债返费为5分钱
+            elif d[4] in [5, 7, 10, 30]:
+                a = 0.1  # 5、7、10、30年期国债返费为0.1元
+            else:
+                a = 0
+            ytm = bond.bond_ytm(d[0], price - a)
+            dd = ([d[0], d[2], d[3], d[4], 100 * (ytm - d[7]), price - a - d[8], d[9]],)
+            data.append(dd)
+        sql2 = "insert into impact values %s"
+        self.cur.executemany(sql2, data)
 
     def insert(self, table=None):
         if table:

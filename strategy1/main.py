@@ -155,7 +155,7 @@ class ImpSat(object):
         data0 = Data(sql0, self.cur)
         dt = np.array(data0.select_col(0))
         rate = np.array(data0.select_col(1))
-        fig, axes = plt.subplots(3, 1, figsize=(12, 6), sharex="all", gridspec_kw={'height_ratios': [3, 1.5, 1.5]})
+        fig, axes = plt.subplots(2, 1, figsize=(6, 3), sharex="all", gridspec_kw={'height_ratios': [4, 2]})
         # 图1，十年国债到期收益率
         axes[0].spines["top"].set_color('none')
         axes[0].spines["right"].set_color("none")
@@ -165,23 +165,23 @@ class ImpSat(object):
         axes[0].spines["bottom"].set_position(('data', 3))
         axes[0].legend(fontsize=15)
         # 图2，国债发行冲击
-        sql1 = r"""select dt, delta from tb_sec_delta where code regexp '[:alnum:]{2}00.*' and seq = 0"""
+        sql1 = r"""select dt, delta from impact where bondtype='国债'"""
         data1 = Data(sql1, self.cur)
         dt1 = np.array(data1.select_col(0))
         delta1 = np.array(data1.select_col(1))
         axes[1].bar(dt1, delta1, label="续发国债冲击（BP)")
-        axes[1].set_ylim(-10, 10)
+        axes[1].set_ylim(-10, 20)
         axes[1].legend(fontsize=10, loc="upper left")
         # 图3，国开债发行冲击
-        sql2 = r"""select dt, delta from tb_sec_delta 
-        where code regexp '[:alnum:]{2}02.*' and seq = 0
-        and delta is not null"""
-        data2 = Data(sql2, self.cur)
-        dt2 = np.array(data2.select_col(0))
-        delta2 = np.array(data2.select_col(1))
-        axes[2].bar(dt2, delta2, label="续发国开债冲击（BP）")
-        axes[2].set_ylim(-20, 10)
-        axes[2].legend(fontsize=10, loc="upper left")
+        # sql2 = r"""select dt, delta from tb_sec_delta
+        # where code regexp '[:alnum:]{2}02.*' and seq = 0
+        # and delta is not null"""
+        # data2 = Data(sql2, self.cur)
+        # dt2 = np.array(data2.select_col(0))
+        # delta2 = np.array(data2.select_col(1))
+        # axes[2].bar(dt2, delta2, label="续发国开债冲击（BP）")
+        # axes[2].set_ylim(-20, 10)
+        # axes[2].legend(fontsize=10, loc="upper left")
         fig.show()
 
 
@@ -200,7 +200,7 @@ class ImpFuture(object):
             future_term = 10
         else:
             raise ValueError("不被接受的参数值future_term")
-        sql1 = """select t1.delta, t2.dsrate, t3.dsrate, t4.dsrate, t5.dsrate, t6.dsrate, t7.dsrate, t8.dsrate
+        sql1 = """select t1.delta, t2.dclose, t3.dclose, t4.dclose, t5.dclose, t6.dclose, t7.dclose, t8.dclose
         from impact t1 inner join future_delta t2 inner join future_delta t3 inner join future_delta t4
         inner join future_delta t5 inner join future_delta t6 inner join future_delta t7 inner join future_delta t8
         on t1.dt = t5.dt and t2.seq = t5.seq - 3 and t3.seq = t5.seq - 2 and t4.seq = t5.seq - 1
@@ -247,20 +247,20 @@ class ImpFuture(object):
         # 根据五等分点（per_delta)从数据库中选出每个分位的
         data = []
         if day == 0:
-            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from impact t1 
+            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.close) from impact t1 
             inner join future_minute t2
             on t1.dt = date(t2.dtt) and t1.bondtype = %s and t2.term = %s 
             and t1.delta > %s and t1.delta <= %s
             group by date_format(t2.dtt, '%%H:%%i')"""
         elif day > 0:
-            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from impact t1 
+            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.close) from impact t1 
             inner join future_minute t2 inner join dts1 t3 inner join dts1 t4
             on t1.dt = t3.dt and t4.seq = t3.seq +{} and t4.dt = date(t2.dtt)
             where t1.bondtype = %s and t2.term = %s and t1.delta > %s and t1.delta <= %s
             group by date_format(t2.dtt, '%%H:%%i')
             """.format(day)
         else:
-            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.rate) from impact t1 
+            sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.close) from impact t1 
             inner join future_minute t2 inner join dts1 t3 inner join dts1 t4
             on t1.dt = t3.dt and t4.seq = t3.seq - {} and t4.dt = date(t2.dtt)
             where t1.bondtype = %s and t2.term = %s and t1.delta > %s and t1.delta <= %s
@@ -283,8 +283,8 @@ class ImpFuture(object):
     def imp_minutes_plot(self, day=0):
         """将利率债发行对国债期货市场的影响可视化，即分别以国债-TF、国债-T、国开债-TF、国开债-T作为参数
         计算imp_minutes，并将结果放入一张4×1的图中"""
-        imp_minutes_params = [("国债", "TF"), ("国债", "T"), ("国开债", "TF"), ("国开债", "T")]
-        fig, axes = plt.subplots(4, 1, figsize=(8,12), sharex="all", )
+        imp_minutes_params = [("国债", "TF"), ("国债", "T")]
+        fig, axes = plt.subplots(2, 1, figsize=(8,8), sharex="all", )
         xmajorLocator = MultipleLocator(4)
         for params, ax in zip(imp_minutes_params, axes):
             data =  self.imp_minutes(*params, day)
@@ -306,17 +306,17 @@ def main():
     plt.rcParams['axes.unicode_minus'] = False
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
-    imp_future = ImpFuture(cur, db)
-    res = imp_future.imp_days("国债", "TF")
-    # imp_future.imp_minutes_plot(3)
-    # imp_sat = ImpSat(db, cur)
-    # imp_sat.imp_and_trend()
+    # imp_future = ImpFuture(cur, db)
+    # res = imp_future.imp_days("国债", "T")
+    # imp_future.imp_minutes_plot(-2)
+    imp_sat = ImpSat(db, cur)
+    imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
     # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
-    for rs in res:
-        print()
-        for r in rs:
-            print(round(r, 4), end=" ")
+    # for rs in res:
+    #     print()
+    #     for r in rs:
+    #         print(round(r, 4), end=" ")
     # imp_sat.imp_delta_plot()
 
 
