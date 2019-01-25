@@ -212,43 +212,43 @@ class Data(object):
 
 class BondYTM(object):
     """本类用于计算续发固定利率附息国债到期收益率"""
-    def __init__(self, terms, rate, dt0: dtt.date, par=100, freq=1):
-        """类初始化函数，terms代表债券年限，rate表示发行利率，dt0表示发行日期，par表示债券面值，默认100
-        freq表示一年附息频次，默认为1"""
+
+    def __init__(self, terms, rate, dt0: dtt.date, par=100):
+        """类初始化函数，terms代表债券年限，rate表示发行利率，dt0表示发行日期，par表示债券面值，默认100，默认付息频率1年1次"""
         self.terms = terms
-        self.rate = rate/100
+        self.rate = rate / 100
         self.dt0 = dt0
+        self.year0 = self.dt0.year
+        self.month0 = self.dt0.month
+        self.day0 = self.dt0.day
         self.par = par
-        self.freq = freq
 
     def get_ts(self, dt: dtt.date):
         dt_delta_days = (dt - self.dt0).days
+
         year_days = 365
         x, y = divmod(dt_delta_days, year_days)
         t0 = 1 - y / year_days
-        ts = [i for i in range((int(self.terms)-x) * self.freq)]
+        ts = [i for i in range(int(self.terms) - x)]
         return t0, ts
 
     def bond_ytm(self, dt: dtt.date, price, guess=0.03):
         """根据价格计算到期收益率"""
         t0, ts = self.get_ts(dt)
-        coup = self.par * self.rate / self.freq
-        ytm_func = lambda y: (sum([coup / (1 + y / self.freq) ** t for t in ts]) + self.par / (1 + y / self.freq) **
-                              ts[-1]) / (1 + t0 * y / self.freq) - price
-        fprime = lambda y: (sum([-t * coup / self.freq / (1 + y / self.freq) ** (t + 1) for t in ts]) - ts[
-            -1] * self.par / self.freq / (1 + y / self.freq) ** (ts[-1] + 1)) / (
-                                       1 + t0 * y / self.freq) - t0 / self.freq * (1 + t0 * y / self.freq) ** (-2) * (
-                                       sum([coup / (1 + y / self.freq) ** t for t in ts]) + self.par / (
-                                           1 + y / self.freq) ** ts[-1])
+        coup = self.par * self.rate
+        ytm_func = lambda y: (sum([coup / (1 + y) ** t for t in ts]) + self.par / (1 + y) ** ts[-1]) / (
+                    1 + t0 * y) - price
+        fprime = lambda y: (sum([-t * coup / (1 + y) ** (t + 1) for t in ts]) - ts[-1] * self.par / (1 + y) ** (
+                    ts[-1] + 1)) / (1 + t0 * y) - t0 * (1 + t0 * y) ** (-2) * (
+                                       sum([coup / (1 + y) ** t for t in ts]) + self.par / (1 + y) ** ts[-1])
         return 100 * optimize.newton(ytm_func, guess, fprime=fprime)
 
     def bond_price(self, dt: dtt.date, rate):
         """根据到期收益率计算价格，参数中dt表示增发债日期，rate表示到期收益率"""
-        rate = rate/100
-        coup = self.par * self.rate / self.freq
+        rate = rate / 100
+        coup = self.par * self.rate
         t0, ts = self.get_ts(dt)
-        price = (sum([coup / (1 + rate / self.freq) ** t for t in ts]) + self.par / (1 + rate / self.freq) ** ts[-1])\
-                / (1 + t0 * rate / self.freq)
+        price = (sum([coup / (1 + rate) ** t for t in ts]) + self.par / (1 + rate) ** ts[-1]) / (1 + t0 * rate)
         return price
 
 
