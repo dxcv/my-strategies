@@ -26,7 +26,7 @@ def create_database(cur, table=None):
     `mg_rate` float(7, 4) DEFAULT NULL COMMENT '边际中标利率',
     `multiplier` float(5, 2) DEFAULT NULL COMMENT '中标倍数',
     `mg_multiplier` float(5, 2) DEFAULT NULL COMMENT '边际中标倍数',
-    `bond_type` char(15) DEFAULT "国债" COMMENT '债券类型',
+    `bond_type` char(15) DEFAULT '国债' COMMENT '债券类型',
     `bid_way` char(15) COMMENT '招标方式',
     `target` char(15) COMMENT '招标标的'
     )ENGINE=InnoDB DEFAULT CHARSET = utf8MB3 COMMENT = '从wind一级发行专题中下载的数据'
