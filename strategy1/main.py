@@ -1,6 +1,7 @@
 # 本文件用于对数据进行统计处理
 # 作者：季俊男
 # 创建日期： 2018/11/14
+# 更新时间：2019/2/14
 
 import pymysql
 import numpy as np
@@ -200,7 +201,7 @@ class ImpFuture(object):
             future_term = 10
         else:
             raise ValueError("不被接受的参数值future_term")
-        sql1 = """select t1.delta, t2.dclose, t3.dclose, t4.dclose, t5.dclose, t6.dclose, t7.dclose, t8.dclose
+        sql1 = """select t1.mg_delta, t2.dclose, t3.dclose, t4.dclose, t5.dclose, t6.dclose, t7.dclose, t8.dclose
         from impact t1 inner join future_delta t2 inner join future_delta t3 inner join future_delta t4
         inner join future_delta t5 inner join future_delta t6 inner join future_delta t7 inner join future_delta t8
         on t1.dt = t5.dt and t2.seq = t5.seq - 3 and t3.seq = t5.seq - 2 and t4.seq = t5.seq - 1
@@ -226,7 +227,7 @@ class ImpFuture(object):
             res.append(d)
         return res
 
-    def imp_minutes(self, bond_type, future_type, day=0):
+    def imp_minutes(self, bond_type, future_type, delta_type, day):
         """计算发行冲击当日的五分钟级的市场走势"""
         if future_type == "TF":
             future_term = 5
@@ -235,10 +236,10 @@ class ImpFuture(object):
         else:
             raise ValueError("不被接受的参数值future_type")
         # 获得delta五等分点
-        sql1 = """select t1.delta from impact t1 inner join future_minute t2
+        sql1 = """select t1.{} from impact t1 inner join future_minute t2
                   on t1.dt = date(t2.dtt) and t2.seq=0
                   where t1.bondtype = %s and t2.term = %s
-                  """
+                  """.format(delta_type)
         delta = np.array(Data(sql1, self.cur, (bond_type, future_term)).data)
         delta = pd.DataFrame(delta, columns=["delta"]).dropna()
         per_delta = [float(delta.min()-1)]
@@ -250,22 +251,23 @@ class ImpFuture(object):
             sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.close) from impact t1 
             inner join future_minute t2
             on t1.dt = date(t2.dtt) and t1.bondtype = %s and t2.term = %s 
-            and t1.delta > %s and t1.delta <= %s
-            group by date_format(t2.dtt, '%%H:%%i')"""
+            and t1.{0} > %s and t1.{0} <= %s
+            group by date_format(t2.dtt, '%%H:%%i')
+            """.format(delta_type)
         elif day > 0:
             sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.close) from impact t1 
             inner join future_minute t2 inner join dts1 t3 inner join dts1 t4
-            on t1.dt = t3.dt and t4.seq = t3.seq +{} and t4.dt = date(t2.dtt)
-            where t1.bondtype = %s and t2.term = %s and t1.delta > %s and t1.delta <= %s
+            on t1.dt = t3.dt and t4.seq = t3.seq +{0} and t4.dt = date(t2.dtt)
+            where t1.bondtype = %s and t2.term = %s and t1.{1} > %s and t1.{1} <= %s
             group by date_format(t2.dtt, '%%H:%%i')
-            """.format(day)
+            """.format(day, delta_type)
         else:
             sql2 = r"""select date_format(t2.dtt, '%%H:%%i'), avg(t2.close) from impact t1 
             inner join future_minute t2 inner join dts1 t3 inner join dts1 t4
-            on t1.dt = t3.dt and t4.seq = t3.seq - {} and t4.dt = date(t2.dtt)
-            where t1.bondtype = %s and t2.term = %s and t1.delta > %s and t1.delta <= %s
+            on t1.dt = t3.dt and t4.seq = t3.seq - {0} and t4.dt = date(t2.dtt)
+            where t1.bondtype = %s and t2.term = %s and t1.{1} > %s and t1.{1} <= %s
             group by date_format(t2.dtt, '%%H:%%i')
-            """.format(abs(day))
+            """.format(abs(day), delta_type)
         for i in range(len(per_delta)-1):
             a = per_delta[i]
             b = per_delta[i+1]
@@ -280,14 +282,14 @@ class ImpFuture(object):
         res = pd.DataFrame(res, index=time_index[1:], columns=["一", "二", "三", "四", "五"])
         return res
 
-    def imp_minutes_plot(self, day=0):
-        """将利率债发行对国债期货市场的影响可视化，即分别以国债-TF、国债-T、国开债-TF、国开债-T作为参数
-        计算imp_minutes，并将结果放入一张4×1的图中"""
+    def imp_minutes_plot(self, day, delta_type):
+        """将利率债发行对国债期货市场的影响可视化，即分别以国债-TF、国债-T作为参数
+        计算imp_minutes，并将结果放入一张2×1的图中"""
         imp_minutes_params = [("国债", "TF"), ("国债", "T")]
-        fig, axes = plt.subplots(2, 1, figsize=(8,8), sharex="all", )
+        fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex="all", )
         xmajorLocator = MultipleLocator(4)
         for params, ax in zip(imp_minutes_params, axes):
-            data =  self.imp_minutes(*params, day)
+            data = self.imp_minutes(*params, delta_type, day)
             ax.spines["top"].set_color("none")
             ax.spines["right"].set_color("none")
             ax.xaxis.set_ticks_position("bottom")
@@ -301,16 +303,21 @@ class ImpFuture(object):
             ax.legend(loc="best")
         fig.show()
 
+    def imp_days_minutes(self,  bond_type, future_type, delta_type, day1, day2):
+        """计算发行前day1日至发行后day2日的国债期货五分钟行情序列"""
+        pass
+
+
 def main():
     mpl.rcParams['font.sans-serif'] = ['SimHei']
     plt.rcParams['axes.unicode_minus'] = False
     db = pymysql.connect("localhost", "root", "root", "strategy1", charset="utf8")
     cur = db.cursor()
-    # imp_future = ImpFuture(cur, db)
-    # res = imp_future.imp_days("国债", "T")
-    # imp_future.imp_minutes_plot(-2)
-    imp_sat = ImpSat(db, cur)
-    imp_sat.imp_and_trend()
+    imp_future = ImpFuture(cur, db)
+    # res = imp_future.imp_days("国债", "TF")
+    imp_future.imp_minutes_plot(2, "mg_delta")
+    # imp_sat = ImpSat(db, cur)
+    # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
     # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
     # for rs in res:

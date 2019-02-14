@@ -1,7 +1,7 @@
 # 本文件用于创建MySQL数据库
 # 季俊男
 # 创建日期：2018/10/22
-
+# 更新时间：2019/2/14
 import pymysql
 import win32com.client
 from WindPy import w
@@ -24,6 +24,7 @@ def create_database(cur, table=None):
     `rate` float(6, 4) DEFAULT NULL COMMENT '中标利率',
     `price` float(7, 4) DEFAULT NULL COMMENT '中标价格',
     `mg_rate` float(7, 4) DEFAULT NULL COMMENT '边际中标利率',
+    `mg_price` float(7, 4) DEFAULT NULL COMMENT '边际中标价格',
     `multiplier` float(5, 2) DEFAULT NULL COMMENT '中标倍数',
     `mg_multiplier` float(5, 2) DEFAULT NULL COMMENT '边际中标倍数',
     `bond_type` char(15) DEFAULT '国债' COMMENT '债券类型',
@@ -151,8 +152,8 @@ def create_database(cur, table=None):
     `code` CHAR(15) NOT NULL COMMENT '续发债券代码' PRIMARY KEY,
     `code0` CHAR(15) NOT NULL COMMENT '续发债对应首发债券代码',
     `term` FLOAT(4,2) NOT NULL COMMENT '债券期限',
-    `delta` FLOAT(7,4) DEFAULT NULL COMMENT '发行冲击（BP）',
-    `dprice` FLOAT(5, 2) DEFAULT NULL COMMENT '发行冲击（元）',
+    `delta` FLOAT(7,4) DEFAULT NULL COMMENT '加权利率发行冲击（BP）',
+    `mg_delta` FLOAT(7, 4) DEFAULT NULL COMMENT '边际利率发行冲击（BP）',
     `bondtype` CHAR(10) DEFAULT NULL COMMENT '债券类型'
     )ENGINE=InnoDB DEFAULT CHARSET=UTF8MB3 COMMENT = '发行冲击'
     """
@@ -166,12 +167,12 @@ def create_database(cur, table=None):
         _ = cur.execute(eval("sql_{}".format(table)))
 
 
-def dt_offset(dt0, offset:int):
-    dt = w.tdaysoffset(offset, dt0, "tradingCalendar=NIB").Data[0][0]
-    try:
-        dt = dt.strftime("%Y-%m-%d")
-    except AttributeError as e:
-        print(dt, e)
+def dt_offset(cur, dt0, offset:int, table="dts2"):
+    """从数据库中提取交易日的偏离值，默认使用银行间交易日（dts2)"""
+    sql = """
+             select t1.dt from {0} t1 inner join {0} t2 on t2.dt = %s and t1.seq = t2.seq + %s
+             """.format(table)
+    dt = Data(sql, cur, (dt0, offset)).data[0][0]
     return dt
 
 
@@ -264,7 +265,7 @@ class BondYTM(object):
                     dt1 = dtt.date(year1, month1, self.day0)
                 except ValueError as e:
                     dt1 = dtt.date(year1, month1+1, 1) - dtt.timedelta(1)
-                if (dt > dt0 and dt <= dt1) or dt == self.dt0:
+                if dt0 < dt <= dt1 or dt == self.dt0:
                     x = 2 * (dt.year - self.year0)
                     y = (dt1 - dt).days + 1
                     half_year_days = (dt1 - dt0).days
@@ -285,7 +286,7 @@ class BondYTM(object):
                     dt1 = dtt.date(year1, month1, self.day0)
                 except ValueError as e:
                     dt1 = dtt.date(year1, month1+1, 1) - dtt.timedelta(1)
-                if (dt > dt1 and dt <= dt0) or dt == self.dt0:
+                if dt1 < dt <= dt0 or dt == self.dt0:
                     x = 2 * (dt.year - self.year0) - 1
                     y = (dt0 - dt).days + 1
                     half_year_days = (dt0 - dt1).days
@@ -327,7 +328,7 @@ class BondYTM(object):
     def bond_price(self, dt: dtt.date, rate, mode=0):
         """根据到期收益率计算价格，参数中dt表示增发债日期，rate表示到期收益率"""
         rate = rate / (100 * self.freq)
-        coup = self.par * self.rate
+        coup = self.par * self.rate / self.freq
         t0, ts = self.get_ts(dt)
         if mode == 0:
             price = (sum([coup / (1 + rate) ** t for t in ts]) + self.par / (1 + rate) ** ts[-1])/(1 + rate) ** t0
@@ -369,11 +370,11 @@ class ReadExcel(object):
         init_pattern = re.compile(r"\d{2}00\d{2}[^xX\d]+")
         data = self.ws.Range(self.ws.Cells(2,1), self.ws.Cells(2,31).End(4)).Value
         # 首发国债数据
-        init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[28], d[10], self.multipliers(d[20], 2),
+        init = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[29], d[28], d[10], None, self.multipliers(d[20], 2),
                  self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6], get_freq(d[0])], )
                 for d in data if re.match(init_pattern, d[0])]
         # 续发国债数据
-        cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[28], d[13], self.multipliers(d[20], 2),
+        cont = [([d[2].strftime("%Y-%m-%d"), d[0], d[4], d[27], d[28], d[13], d[13], self.multipliers(d[20], 2),
                  self.mg_multipliers(d[14], d[15]), d[30], d[5], d[6], get_freq(d[0])], )
                 for d in data if re.match(cont_pattern, d[0])]
         init.extend(cont)
@@ -534,7 +535,7 @@ class Excel2DB(object):
         sql1 = """update tb_pri set pay_times = %s where code = %s"""
         sql2 = """select code from appendix1 where dt between %s and %s"""
         self.cur.execute(sql, (dt1, dt2))
-        codes = Data(sql, self.cur, (dt1, dt2)).select_col(0)
+        codes = Data(sql2, self.cur, (dt1, dt2)).select_col(0)
         data = [(get_freq(code), code) for code in codes]
         self.cur.executemany(sql1, data)
         self.db.commit()
@@ -581,22 +582,52 @@ class Excel2DB(object):
     def update_mg_rate(self):
         """在续发国债招标发行中，Wind给出的边际利率其实是价格，需要转换为利率，借助BondYIM类可以做到将价格转换为收益率"""
         # 利用边际利率是否大于50来判断该字段的记录是价格还是利率，当大于50时一般对应的时价格，因为利率很难超过50%
-        sql_select = """
-                     select t1.dt, t1.code, t1.term, t1.rate, t1.mg_rate, t2.dt, t2.code, t2.rate,t2.pay_times, 
-                     t3.dt_pay 
-                     from tb_pri t1, tb_pri t2, appendix1 t3 
-                     where t2.code = concat(left(t1.code, 6), ".IB")
-                     and t1.code = t3.code 
-                     and t1.mg_rate > 50
-                     """
-        data = Data(sql_select, self.cur).data
+        sql_update0 = """
+                      update tb_pri t1
+                      inner join appendix1 t2
+                      on t1.code = t2.code
+                      set t1.mg_rate = t2.mg_rate
+                      where t1.mg_rate > 50 and t2.mg_rate is not null
+                      """
+        sql_select1 = """
+                      select t1.dt, t1.code, t1.term, t1.rate, t1.mg_rate, t2.dt, t2.code, t2.rate,t2.pay_times, 
+                      t3.dt_pay 
+                      from tb_pri t1, tb_pri t2, appendix1 t3 
+                      where t2.code = concat(left(t1.code, 6), ".IB")
+                      and t1.code = t3.code 
+                      and t1.mg_rate > 50
+                      """
+        data1 = Data(sql_select1, self.cur).data
         # for d in data:
         #     print(d[2], d[7], d[5], d[0], d[4], d[1], end="     ")
         #     print(BondYTM(d[2], d[7], d[5]).bond_ytm(d[0], d[4]))
-        data_update = [[BondYTM(d[2], d[7], d[5], d[8]).bond_ytm(d[9], d[4]), d[1]] for d in data]
-        sql_update = """update tb_pri set mg_rate = %s where code = %s"""
+        data_update1 = [[BondYTM(d[2], d[7], d[5], d[8]).bond_ytm(d[9], d[4]), d[1]] for d in data1]
+        sql_update1 = """update tb_pri set mg_rate = %s where code = %s"""
         try:
-            _ = self.cur.executemany(sql_update, data_update)
+            _ = self.cur.execute(sql_update0)
+            _ = self.cur.executemany(sql_update1, data_update1)
+        except:
+            self.db.rollback()
+        else:
+            self.db.commit()
+
+    def update_mg_price(self):
+        """计算边际中标价格，原理类似于update_mg_rate，注意实际创建数据库时，该方法须在update_mg_rate运行之后使用"""
+        sql_select2 = """
+                      select t1.dt, t1.code, t1.term, t1.rate, t1.mg_rate, t2.dt, t2.code, t2.rate,t2.pay_times, 
+                      t3.dt_pay 
+                      from tb_pri t1, tb_pri t2, appendix1 t3 
+                      where t2.code = concat(left(t1.code, 6), ".IB")
+                      and t1.code = t3.code 
+                      and t1.mg_price is null
+                      and t1.mg_rate is not null
+                      and t3.dt_pay is not null
+                      """
+        data2 = Data(sql_select2, self.cur).data
+        data_update2 = [[BondYTM(d[2], d[7], d[5], d[8]).bond_price(d[9], d[4]), d[1]] for d in data2]
+        sql_update2 = """update tb_pri set mg_price = %s where code = %s"""
+        try:
+            _ = self.cur.executemany(sql_update2, data_update2)
         except:
             self.db.rollback()
         else:
@@ -642,7 +673,8 @@ class Wind2DB(object):
             datum = Data(sql2, self.cur, p).data
             for d in datum:
                 # print(d)
-                res = w.wsd(code_init, "yield_cnbd,net_cnbd,dirty_cnbd", dt_offset(d[1], -1), dt_offset(d[1], 10),
+                res = w.wsd(code_init, "yield_cnbd,net_cnbd,dirty_cnbd", dt_offset(self.cur, d[1], -1),
+                            dt_offset(self.cur, d[1], 10),
                             "credibility=1;TradingCalendar=NIB")
                 try:
                     ys, ns, ds = res.Data
@@ -657,7 +689,7 @@ class Wind2DB(object):
         return data
 
     @staticmethod
-    def get_data_tb_rate(dt1="2013-1-1", dt2="2018-10-22"):
+    def get_data_tb_rate(dt1="2013-1-1", dt2="2019-1-31"):
         """本方法用于从WIND获取国债与国开债的期限利率的中债估值，共9个期限，分别是1Y 2Y 3Y 5Y 7Y 10Y 20Y 30Y 50Y"""
         code1 = ["S0059744", "S0059745", "S0059746", "S0059747", "S0059748", "S0059749", "S0059751",
                  "S0059752", "M1000170"]
@@ -675,7 +707,7 @@ class Wind2DB(object):
         return data
 
     @staticmethod
-    def get_data_future(dt="2018-10-22"):
+    def get_data_future(dt="2019-1-31"):
         """本函数用于从WIND获取建立国债期货结算价与收盘价表格所需的数据,包括TF与T合约"""
         wd_tf = w.wsd("TF.CFE", "settle,close", "2013-9-6", dt, "")
         wd_t =  w.wsd("TF.CFE", "settle,close", "2015-3-20", dt, "")
@@ -697,7 +729,7 @@ class Wind2DB(object):
         return data
 
     @staticmethod
-    def get_data_money(dt1=dtt.date(2013, 1, 1), dt2=dtt.date(2018, 10, 22),
+    def get_data_money(dt1=dtt.date(2013, 1, 1), dt2=dtt.date(2019, 1, 31),
                        codes=("FR007.IR", "SHIBOR3M.IR", "SHIBORON.IR")):
         """从Wind提取货币市场利率数据"""
         res = []
@@ -711,7 +743,7 @@ class Wind2DB(object):
 
     @staticmethod
     def get_data_future_minute(codes=("TF.CFE", "T.CFE"), barsize=5,
-                               dt=dtt.datetime(2018, 10, 22, 15, 16, 00)):
+                               dt=dtt.datetime(2019, 1, 31, 15, 16, 00)):
         """从Wind提取分钟序列"""
         res = list()
         for code in codes:
@@ -736,7 +768,7 @@ class Wind2DB(object):
         return res
 
     @staticmethod
-    def get_data_dts1(dt1="2013-1-1", dt2="2018-10-22"):
+    def get_data_dts1(dt1="2013-1-1", dt2="2019-1-31"):
         """从Wind提取交易所的交易日序列"""
         wdata = w.tdays(dt1, dt2, "")
         d = wdata.Data[0]
@@ -745,7 +777,7 @@ class Wind2DB(object):
         return data
 
     @staticmethod
-    def get_data_dts2(dt1="2013-1-1", dt2="2018-10-22"):
+    def get_data_dts2(dt1="2013-1-1", dt2="2019-1-31"):
         """从Wind提取银行间的交易日序列"""
         wdata = w.tdays(dt1, dt2, "TradingCalendar=NIB")
         d = wdata.Data[0]
@@ -837,26 +869,29 @@ class DB2self(object):
     def insert_impact(self):
         """向数据库中的impact表插入数据"""
         sql1 = """
-        select t1.dt, t3.dt, t1.code, t2.code0, t1.term, t3.rate, t1.mg_rate, t2.yield, t2.net, t1.bond_type
-        from tb_pri t1 inner join tb_sec t2 inner join tb_pri t3
-        on t1.code = t2.code and t2.seq = 0 and t3.code = t2.code0
-        and t1.bond_type = '国债'
+        select t1.dt, t1.code, t1.term, t1.price, t1.mg_price, t1.pay_times, t2.code, t2.dt, t2.rate, t3.yield, 
+        t4.dt_pay,t1.bond_type 
+        from tb_pri t1 inner join tb_pri t2 inner join tb_sec t3 inner join appendix1 t4
+        on t1.code = t3.code and t2.code = t3.code0 and t1.code = t4.code and t3.seq = 0
+        where t1.bond_type = '国债' and t1.mg_price is not null
         """
         data1 = Data(sql1, self.cur).data
         data = []
         for d in data1:
-            if d[6] is None:
+            if d[3] is None:
                 continue
-            bond = BondYTM(d[4], d[5], d[1])
-            price = bond.bond_price(d[0], d[6])
-            if d[4] in [3]:
+            bond = BondYTM(d[2], d[8], d[7], d[5])
+            price = d[3]
+            mg_price = d[4]
+            if d[2] in [3]:
                 a = 0.05  # 2年期国债返费为5分钱
-            elif d[4] in [5, 7, 10, 30]:
+            elif d[2] in [5, 7, 10, 30]:
                 a = 0.1  # 5、7、10、30年期国债返费为0.1元
             else:
                 a = 0
-            ytm = bond.bond_ytm(d[0], price - a)
-            dd = ([d[0], d[2], d[3], d[4], 100 * (ytm - d[7]), price - a - d[8], d[9]],)
+            ytm = bond.bond_ytm(d[10], price - a)
+            mg_ytm = bond.bond_ytm(d[10], mg_price - a)
+            dd = ([d[0], d[1], d[6], d[2], 100 * (ytm - d[9]), 100 * (mg_ytm - d[9]), d[11]],)
             data.append(dd)
         sql2 = "insert into impact values %s"
         self.cur.executemany(sql2, data)
@@ -875,21 +910,22 @@ def main():
     # data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
-    w.start()
-    create_database(cur, "pass")
-    e2db = Excel2DB(data_path, db, cur)
-    years = range(2013, 2020)
-    # db2self = DB2self(db, cur)
+    # w.start()
+    create_database(cur, "impact")
+    # e2db = Excel2DB(data_path, db, cur)
+    # years = range(2013, 2020)
+    db2self = DB2self(db, cur)
     # w2db = Wind2DB(db, cur)
 
     try:
-        e2db.insert(years)
-        e2db.update()
-        e2db.update_mg_rate()
-        e2db.update_price()
-    #     w2db.insert("dts2")
-    #     db2self.create_function("imp_dprice")
-    #     db2self.insert("impact")
+        # e2db.insert(years)
+        # e2db.update()
+        # e2db.update_mg_rate()
+        # e2db.update_price()
+        # e2db.update_mg_price()
+        # w2db.insert("future_minute")
+        # db2self.create_function("imp_dprice")
+        db2self.insert("impact")
     finally:
         cur.close()
         db.close()
