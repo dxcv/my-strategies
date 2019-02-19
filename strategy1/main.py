@@ -14,7 +14,14 @@ from matplotlib.ticker import  MultipleLocator
 from matplotlib.ticker import  FormatStrFormatter
 
 
-def imp_select_code(imp:list, cur, column="delta"):
+def p2r(price):
+    """将价格时间序列转换为收益率序列，默认为以初始值为基准"""
+    p0 = price[0]  # 初始价格
+    res = [100 * (p - p0) / p0 for p in price]
+    return res
+
+
+def imp_select_code(imp: list, cur, column="delta"):
     res = list()
     res.append(Data(r"select code from tb_sec_delta where seq=0 and {} <= %s".format(column),
                     cur, (imp[0],)).select_col(0))
@@ -305,7 +312,26 @@ class ImpFuture(object):
 
     def imp_days_minutes(self,  bond_type, future_type, delta_type, day1, day2):
         """计算发行前day1日至发行后day2日的国债期货五分钟行情序列"""
-        pass
+        sql1 = """
+        select t1.dt, t1.term, t1.delta, t2.dt, t3.dt
+        from impact t1 inner join dts1 t2 inner join dts1 t3 inner join dts1 t4
+        on t1.dt = t4.dt and t2.seq = t4.seq - %s and t3.seq = t4.seq + %s
+        where t1.delta is not null 
+        order by t1.delta"""
+        data1 = Data(sql1, self.cur, (day1, day2)).data
+        # 提取交易行情序列
+        data2 = []
+        sql2 = """
+        select close from future_minute
+        where date(dtt) between %s and %s"""
+        for d1 in data1:
+            d2 = Data(sql2, self.cur, (d1[3], d1[4])).select_col(1)
+            d2 = p2r(d2)
+
+
+
+
+
 
 
 def main():
