@@ -14,10 +14,13 @@ from matplotlib.ticker import  MultipleLocator
 from matplotlib.ticker import  FormatStrFormatter
 
 
-def p2r(price):
-    """将价格时间序列转换为收益率序列，默认为以初始值为基准"""
-    p0 = price[0]  # 初始价格
-    res = [100 * (p - p0) / p0 for p in price]
+def p2r(price, mode=0):
+    """将价格时间序列转换为收益率序列，默认为以初始值为基准，当mode为0时返回原价格序列，若为1则返回涨跌幅"""
+    if mode == 0:
+        res = price
+    elif mode == 1:
+        p0 = price[0]  # 初始价格
+        res = [100 * (p - p0) / p0 for p in price]
     return res
 
 
@@ -310,28 +313,48 @@ class ImpFuture(object):
             ax.legend(loc="best")
         fig.show()
 
-    def imp_days_minutes(self,  bond_type, future_type, delta_type, day1, day2):
+    def imp_days_minutes(self, day1, day2, future_type, bond_type="国债", delta_type="delta"):
         """计算发行前day1日至发行后day2日的国债期货五分钟行情序列"""
+        if future_type == "TF":
+            future_term = 5
+        elif future_type == "T":
+            future_term = 10
+        else:
+            raise ValueError("不被接受的参数值future_type")
+
         sql1 = """
-        select t1.dt, t1.term, t1.delta, t2.dt, t3.dt
+        select t1.dt, t1.term, t1.{0}, t2.dt, t3.dt, t1.bondtype
         from impact t1 inner join dts1 t2 inner join dts1 t3 inner join dts1 t4
-        on t1.dt = t4.dt and t2.seq = t4.seq - %s and t3.seq = t4.seq + %s
-        where t1.delta is not null 
-        order by t1.delta"""
+        on t1.dt = t4.dt and t2.seq = t4.seq - %s and t3.seq = t4.seq + %s and t1.bondtype = "{1}"
+        where t1.{0} is not null and t1.dt >= '2016-2-18'
+        order by t1.{0}
+        """.format(delta_type, bond_type)
         data1 = Data(sql1, self.cur, (day1, day2)).data
+        num = len(data1)  # 提取记录的个数，用于
+        print(num)
         # 提取交易行情序列
         data2 = []
         sql2 = """
         select close from future_minute
-        where date(dtt) between %s and %s"""
+        where date(dtt) between %s and %s and term = {}
+        """.format(future_term)
         for d1 in data1:
-            d2 = Data(sql2, self.cur, (d1[3], d1[4])).select_col(1)
-            d2 = p2r(d2)
-
-
-
-
-
+            d2 = Data(sql2, self.cur, (d1[3], d1[4])).select_col(0)
+            d2 = p2r(d2, mode=0)
+            data2.append(d2)
+        k = 5  # 五等分
+        n = round(num / 5)  # 每个分位的记录个数
+        res = []  # 结果res用于保存
+        for i in range(k):
+            a = i * n
+            if i == k - 1:
+                b = num
+            else:
+                b = n * (i + 1)
+            dddd = data2[a:b]
+            r = np.mean(data2[a:b], axis=0)
+            res.append(r)
+        return res
 
 
 def main():
@@ -341,15 +364,16 @@ def main():
     cur = db.cursor()
     imp_future = ImpFuture(cur, db)
     # res = imp_future.imp_days("国债", "TF")
-    imp_future.imp_minutes_plot(2, "mg_delta")
+    # imp_future.imp_minutes_plot(2, "mg_delta")
+    res = imp_future.imp_days_minutes(3, 1, "T")
     # imp_sat = ImpSat(db, cur)
     # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
     # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
-    # for rs in res:
-    #     print()
-    #     for r in rs:
-    #         print(round(r, 4), end=" ")
+    for rs in res:
+        print()
+        for r in rs:
+            print(round(r, 4), end=" ")
     # imp_sat.imp_delta_plot()
 
 
