@@ -1,17 +1,18 @@
 # 本文件用于对数据进行统计处理
 # 作者：季俊男
 # 创建日期： 2018/11/14
-# 更新时间：2019/2/14
+# 更新时间：2019/2/21
 
 import pymysql
 import numpy as np
 import pandas as pd
+import datetime as dtt
 import matplotlib.pyplot as plt
 from database import Data
 import statsmodels.api as sm
-from pylab import mpl
-from matplotlib.ticker import  MultipleLocator
-from matplotlib.ticker import  FormatStrFormatter
+from matplotlib.ticker import Locator
+from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import FormatStrFormatter
 
 
 def p2r(price, mode=0):
@@ -33,6 +34,28 @@ def imp_select_code(imp: list, cur, column="delta"):
                         cur, (imp[i], imp[i+1])).select_col(0))
     res.append(Data(r"select code from tb_sec_delta where seq=0 and {} > %s".format(column),
                     cur, (imp[-1],)).select_col(0))
+    return res
+
+
+def trading_time(dt, minute_delta=5):
+    """生成交易日的交易时间序列，minute_delta是时间间隔，默认为5分钟"""
+    res = []
+    dt_time0 = dtt.datetime(dt.year, dt.month, dt.day, 9, 20, 0)
+    dt_time1 = dtt.datetime(dt.year, dt.month, dt.day, 11, 30, 0)
+    dt_time2 = dtt.datetime(dt.year, dt.month, dt.day, 13, 5, 0)
+    dt_time3 = dtt.datetime(dt.year, dt.month, dt.day, 15, 15, 0)
+    dt_times_am = []
+    dt_times_pm = []
+    dt_time = dt_time0
+    while dt_time <= dt_time1:
+        dt_times_am.append(dt_time)
+        dt_time += dtt.timedelta(minutes=minute_delta)
+    res.extend(dt_times_am)
+    dt_time = dt_time2
+    while dt_time <= dt_time3:
+        dt_times_pm.append(dt_time)
+        dt_time += dtt.timedelta(minutes=minute_delta)
+    res.extend(dt_times_pm)
     return res
 
 
@@ -313,22 +336,24 @@ class ImpFuture(object):
             ax.legend(loc="best")
         fig.show()
 
-    def imp_days_minutes(self, day1, day2, future_type, bond_type="国债", delta_type="delta"):
-        """计算发行前day1日至发行后day2日的国债期货五分钟行情序列"""
+    def imp_days_minutes(self, day1, day2, future_type, bond_type="国债", delta_type="delta", k=5, p2r_mode=0):
+        """计算发行前day1日至发行后day2日的国债期货五分钟行情序列，k为等分数，默认为5等分"""
         if future_type == "TF":
             future_term = 5
         elif future_type == "T":
             future_term = 10
         else:
             raise ValueError("不被接受的参数值future_type")
-
+        dt0 = dtt.date(2016, 2, 15)
+        dt1 = dt0 + dtt.timedelta(days=day1)
+        sdt = dt1.strftime("%Y-%m-%d")
         sql1 = """
         select t1.dt, t1.term, t1.{0}, t2.dt, t3.dt, t1.bondtype
         from impact t1 inner join dts1 t2 inner join dts1 t3 inner join dts1 t4
         on t1.dt = t4.dt and t2.seq = t4.seq - %s and t3.seq = t4.seq + %s and t1.bondtype = "{1}"
-        where t1.{0} is not null and t1.dt >= '2016-2-18'
+        where t1.{0} is not null and t1.dt >= '{2}'
         order by t1.{0}
-        """.format(delta_type, bond_type)
+        """.format(delta_type, bond_type, sdt)
         data1 = Data(sql1, self.cur, (day1, day2)).data
         num = len(data1)  # 提取记录的个数，用于
         print(num)
@@ -340,10 +365,9 @@ class ImpFuture(object):
         """.format(future_term)
         for d1 in data1:
             d2 = Data(sql2, self.cur, (d1[3], d1[4])).select_col(0)
-            d2 = p2r(d2, mode=0)
+            d2 = p2r(d2, mode=p2r_mode)
             data2.append(d2)
-        k = 5  # 五等分
-        n = round(num / 5)  # 每个分位的记录个数
+        n = round(num / k)  # 每个分位的记录个数
         res = []  # 结果res用于保存
         for i in range(k):
             a = i * n
@@ -351,10 +375,40 @@ class ImpFuture(object):
                 b = num
             else:
                 b = n * (i + 1)
-            dddd = data2[a:b]
             r = np.mean(data2[a:b], axis=0)
             res.append(r)
         return res
+
+    def imp_days_minutes_plot(self, day1, day2, k=5, bond_type="国债", delta_type="delta"):
+        """将imp_days_minutes方法获得的数据以折线图的方式展现出来"""
+        # 2×1的画板
+        fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex="all", )
+        # 生成横坐标轴值
+        dt0 = dtt.date(2016, 2, 15)
+        times = trading_time(dt0)
+        strtimes = [time.strftime("%H:%M") for time in times]
+        days = []
+        days1 = ["T-{}".format(day) for day in range(day1, 0, -1)]
+        days2 = ["T+{}".format(day) for day in range(0, day2+1)]
+        days.extend(days1)
+        days.extend(days2)
+        index = []
+        for day in days:
+            for time in strtimes:
+                if time == "11:30":
+                    index.append("{}_{}/{}".format(day, time, "13:00"))
+                else:
+                    index.append("{}_{}".format(day, time))
+        columns0 = ["一", "二", "三", "四", "五", "六", "七"]
+        columns = columns0[0: k]
+
+        for contract, ax in zip(["T", "TF"], axes):
+            data = self.imp_days_minutes(day1, day2, contract, bond_type, delta_type, k)
+            pd_data = pd.DataFrame(data, index=index, columns=columns)
+
+
+
+
 
 
 def main():
