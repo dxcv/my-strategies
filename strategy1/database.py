@@ -15,7 +15,6 @@ import re, math
 def create_database(cur, table=None):
     """本函数用于创建数据库与表"""
     _ = cur.execute("create database if not exists strategy1 character set UTF8MB4")
-    _ = cur.execute("use strategy1")
     sql_tb_pri = """
     create table if not exists tb_pri(
     `dt` date NOT NULL COMMENT '发行日期',
@@ -226,7 +225,7 @@ class Data(object):
 class BondYTM(object):
     """本类用于计算续发固定利率附息国债到期收益率"""
 
-    def __init__(self, term, rate, dt0: dtt.date, freq = 1, par=100):
+    def __init__(self, term, rate, dt0: dtt.date, freq=1, par=100):
         """类初始化函数，terms代表债券年限，rate表示发行利率，dt0表示发行日期，par表示债券面值，默认100，付息频率支持
         1年1次或1年2次"""
         self.term = term
@@ -638,8 +637,8 @@ class Excel2DB(object):
         sql_select = r"""
                       select t1.dt, t1.code, t1.term, t1.rate, t2.dt, t2.code, t2.rate, t2.pay_times, t3.dt_pay
                       from tb_pri t1 inner join tb_pri t2 inner join appendix1 t3
-                      on t1.code = concat(left(t2.code, 6), ".IB") and t1.code = t3.code
-                      where t2.price is null
+                      on t1.code = concat(left(t2.code, 6), ".IB") and t2.code = t3.code
+                      where t2.dt between '2017-7-29' and '2017-11-21'
                       """
         data = Data(sql_select, self.cur).data
         data_update = [[BondYTM(d[2], d[3], d[0], d[7]).bond_price(d[8], d[6]), d[5]] for d in data]
@@ -910,8 +909,9 @@ def main():
     # data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
+    _ = cur.execute("use strategy1")
     # w.start()
-    create_database(cur, "impact")
+    # create_database(cur, "impact")
     # e2db = Excel2DB(data_path, db, cur)
     # years = range(2013, 2020)
     db2self = DB2self(db, cur)

@@ -10,7 +10,7 @@ import datetime as dtt
 import matplotlib.pyplot as plt
 from database import Data
 import statsmodels.api as sm
-from matplotlib.ticker import Locator
+from pylab import mpl
 from matplotlib.ticker import MultipleLocator
 from matplotlib.ticker import FormatStrFormatter
 
