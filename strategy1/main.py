@@ -11,8 +11,7 @@ import matplotlib.pyplot as plt
 from database import Data
 import statsmodels.api as sm
 from pylab import mpl
-from matplotlib.ticker import MultipleLocator
-from matplotlib.ticker import FormatStrFormatter
+from matplotlib.ticker import MultipleLocator, FixedLocator, FixedFormatter
 
 
 def p2r(price, mode=0):
@@ -22,6 +21,8 @@ def p2r(price, mode=0):
     elif mode == 1:
         p0 = price[0]  # 初始价格
         res = [100 * (p - p0) / p0 for p in price]
+    else:
+        raise ValueError("不被接受的mode值")
     return res
 
 
@@ -356,7 +357,7 @@ class ImpFuture(object):
         """.format(delta_type, bond_type, sdt)
         data1 = Data(sql1, self.cur, (day1, day2)).data
         num = len(data1)  # 提取记录的个数，用于
-        print(num)
+        # print(num)
         # 提取交易行情序列
         data2 = []
         sql2 = """
@@ -379,7 +380,7 @@ class ImpFuture(object):
             res.append(r)
         return res
 
-    def imp_days_minutes_plot(self, day1, day2, k=5, bond_type="国债", delta_type="delta"):
+    def imp_days_minutes_plot(self, day1, day2, k, contract, delta_type="delta", bond_type="国债"):
         """将imp_days_minutes方法获得的数据以折线图的方式展现出来"""
         # 2×1的画板
         fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex="all", )
@@ -399,16 +400,27 @@ class ImpFuture(object):
                     index.append("{}_{}/{}".format(day, time, "13:00"))
                 else:
                     index.append("{}_{}".format(day, time))
+        # 选取分位标签
         columns0 = ["一", "二", "三", "四", "五", "六", "七"]
         columns = columns0[0: k]
-
-        for contract, ax in zip(["T", "TF"], axes):
-            data = self.imp_days_minutes(day1, day2, contract, bond_type, delta_type, k)
-            pd_data = pd.DataFrame(data, index=index, columns=columns)
-
-
-
-
+        # 获取数据
+        data1 = self.imp_days_minutes(day1, day2, contract, k=k, p2r_mode=0, delta_type=delta_type)
+        data2 = self.imp_days_minutes(day2, day2, contract, k=k, p2r_mode=1, delta_type=delta_type)
+        pd_data1 = pd.DataFrame(list(zip(*data1)), index=index, columns=columns)
+        pd_data2 = pd.DataFrame(list(zip(*data2)), index=index, columns=columns)
+        # 开始作图
+        for ax, pd_data in zip(axes, [pd_data1, pd_data2]):
+            labels = pd_data.columns
+            for i in range(len(labels)):
+                ax.plot(pd_data.index, pd_data.iloc[:, i], label=labels[i])
+        # 设置最后一个子图的X轴形式
+        locator = FixedLocator([54 * d + 26 for d in range(day1 + day2 + 1)])  # 设定横坐标标签
+        formatter = FixedFormatter(days)
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
+        # 图例
+        ax.legend(loc="best")
+        fig.show()
 
 
 def main():
@@ -419,15 +431,16 @@ def main():
     imp_future = ImpFuture(cur, db)
     # res = imp_future.imp_days("国债", "TF")
     # imp_future.imp_minutes_plot(2, "mg_delta")
-    res = imp_future.imp_days_minutes(3, 1, "T")
+    # res = imp_future.imp_days_minutes(3, 1, "T")
+    imp_future.imp_days_minutes_plot(3, 3, 5, "T")
     # imp_sat = ImpSat(db, cur)
     # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
     # res = imp_sat.imp_future(list(range(-19, 16, 5)), list(range(1, 6)), term=10)
-    for rs in res:
-        print()
-        for r in rs:
-            print(round(r, 4), end=" ")
+    # for rs in res:
+    #     print()
+    #     for r in rs:
+    #         print(round(r, 4), end=" ")
     # imp_sat.imp_delta_plot()
 
 
