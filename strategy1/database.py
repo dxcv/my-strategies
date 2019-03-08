@@ -9,7 +9,8 @@ import datetime as dtt
 import numpy as np
 import pandas as pd
 import scipy.optimize as optimize
-import re, math
+import re
+import math
 
 
 def create_database(cur, table=None):
@@ -305,10 +306,16 @@ class BondYTM(object):
             raise ValueError("不被接受的参数值self.freq")
         return t0, ts
 
-    def bond_ytm(self, dt: dtt.date, price, mode=0, guess=0.03):
+    def bond_ytm(self, dt: dtt.date, price, guess=0.03):
         """根据价格计算到期收益率，当mode=0时，不足1年的现金流仍以复利形式计算，当mode=1时，不足1年的现金流以单利按天数计算"""
-        t0, ts = self.get_ts(dt)
         coup = self.par * self.rate/self.freq
+        t0, ts = self.get_ts(dt)
+        # 当债券期限为1年时，到期收益率按照单利方式计算
+        if self.term == 1:
+            mode = 1
+        else:
+            mode = 0
+        # 根据不同的mode计算到期收益率
         if mode == 0:
             ytm_func = lambda y: (sum([coup / (1 + y) ** t for t in ts]) + self.par / (1 + y) ** ts[-1]) / (
                         1 + y) ** t0 - price
@@ -324,11 +331,17 @@ class BondYTM(object):
             raise ValueError("不被接受的参数值mode")
         return self.freq * 100 * optimize.newton(ytm_func, guess, fprime=fprime)
 
-    def bond_price(self, dt: dtt.date, rate, mode=0):
+    def bond_price(self, dt: dtt.date, rate):
         """根据到期收益率计算价格，参数中dt表示增发债日期，rate表示到期收益率"""
         rate = rate / (100 * self.freq)
         coup = self.par * self.rate / self.freq
         t0, ts = self.get_ts(dt)
+        # 当债券期限为1年时，到期收益率按照单利方式计算
+        if self.term == 1:
+            mode = 1
+        else:
+            mode = 0
+        # 根据不同的mode计算全价
         if mode == 0:
             price = (sum([coup / (1 + rate) ** t for t in ts]) + self.par / (1 + rate) ** ts[-1])/(1 + rate) ** t0
         elif mode == 1:
@@ -789,7 +802,7 @@ class Wind2DB(object):
             data = eval("self.get_data_{}()".format(table))
             self.cur.executemany(r"insert into {} values %s".format(table), data)
         else:
-            for t in ["tb_sec", "tb_rate", "future", "payment", "money", "future_minute", "dts1", "dts2"]:
+            for t in ["dts1", "dts2", "tb_sec", "tb_rate", "future", "payment", "money", "future_minute"]:
                 data = eval("self.get_data_{}()".format(t))
                 self.cur.executemany(r"insert into {} values %s".format(t), data)
         self.db.commit()
@@ -905,17 +918,17 @@ class DB2self(object):
 
 
 def main():
-    data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
+    # data_path = r"f:\reports\my report\report1\数据"  # excel数据文件存放路径
     # data_path = r"C:\Users\daidi\Documents\我的研究报告\利率债一级市场与二级市场关系研究\数据"  # excel数据文件存放路径
     db = pymysql.connect("localhost", "root", "root", charset="utf8")
     cur = db.cursor()
     _ = cur.execute("use strategy1")
-    # w.start()
-    # create_database(cur, "impact")
+    w.start()
+    # create_database(cur, None)
     # e2db = Excel2DB(data_path, db, cur)
     # years = range(2013, 2020)
-    db2self = DB2self(db, cur)
-    # w2db = Wind2DB(db, cur)
+    # db2self = DB2self(db, cur)
+    w2db = Wind2DB(db, cur)
 
     try:
         # e2db.insert(years)
@@ -923,9 +936,8 @@ def main():
         # e2db.update_mg_rate()
         # e2db.update_price()
         # e2db.update_mg_price()
-        # w2db.insert("future_minute")
-        # db2self.create_function("imp_dprice")
-        db2self.insert("impact")
+        w2db.insert("future_minute")
+        # db2self.insert("impact")
     finally:
         cur.close()
         db.close()

@@ -186,38 +186,7 @@ class ImpSat(object):
         plt.show()
 
     def imp_and_trend(self):
-        sql0 = r"""select dt, rate from tb_rate where term = 10 and bond_type ='国债'"""
-        data0 = Data(sql0, self.cur)
-        dt = np.array(data0.select_col(0))
-        rate = np.array(data0.select_col(1))
-        fig, axes = plt.subplots(2, 1, figsize=(6, 3), sharex="all", gridspec_kw={'height_ratios': [4, 2]})
-        # 图1，十年国债到期收益率
-        axes[0].spines["top"].set_color('none')
-        axes[0].spines["right"].set_color("none")
-        axes[0].xaxis.set_ticks_position("bottom")
-        axes[0].yaxis.set_ticks_position("left")
-        axes[0].plot(dt, rate, label="十年国债收益率")
-        axes[0].spines["bottom"].set_position(('data', 3))
-        axes[0].legend(fontsize=15)
-        # 图2，国债发行冲击
-        sql1 = r"""select dt, delta from impact where bondtype='国债'"""
-        data1 = Data(sql1, self.cur)
-        dt1 = np.array(data1.select_col(0))
-        delta1 = np.array(data1.select_col(1))
-        axes[1].bar(dt1, delta1, label="续发国债冲击（BP)")
-        axes[1].set_ylim(-10, 20)
-        axes[1].legend(fontsize=10, loc="upper left")
-        # 图3，国开债发行冲击
-        # sql2 = r"""select dt, delta from tb_sec_delta
-        # where code regexp '[:alnum:]{2}02.*' and seq = 0
-        # and delta is not null"""
-        # data2 = Data(sql2, self.cur)
-        # dt2 = np.array(data2.select_col(0))
-        # delta2 = np.array(data2.select_col(1))
-        # axes[2].bar(dt2, delta2, label="续发国开债冲击（BP）")
-        # axes[2].set_ylim(-20, 10)
-        # axes[2].legend(fontsize=10, loc="upper left")
-        fig.show()
+        """"""
 
 
 class ImpFuture(object):
@@ -345,19 +314,19 @@ class ImpFuture(object):
             future_term = 10
         else:
             raise ValueError("不被接受的参数值future_type")
-        dt0 = dtt.date(2016, 2, 15)
+        dt0 = dtt.date(2016, 1, 8)
         dt1 = dt0 + dtt.timedelta(days=day1)
         sdt = dt1.strftime("%Y-%m-%d")
         sql1 = """
         select t1.dt, t1.term, t1.{0}, t2.dt, t3.dt, t1.bondtype
         from impact t1 inner join dts1 t2 inner join dts1 t3 inner join dts1 t4
         on t1.dt = t4.dt and t2.seq = t4.seq - %s and t3.seq = t4.seq + %s and t1.bondtype = "{1}"
-        where t1.{0} is not null and t1.dt >= '{2}'
+        where t1.{0} is not null and t1.dt >= '{2}' 
         order by t1.{0}
         """.format(delta_type, bond_type, sdt)
         data1 = Data(sql1, self.cur, (day1, day2)).data
         num = len(data1)  # 提取记录的个数，用于
-        # print(num)
+        print(num)
         # 提取交易行情序列
         data2 = []
         sql2 = """
@@ -383,7 +352,7 @@ class ImpFuture(object):
     def imp_days_minutes_plot(self, day1, day2, k, contract, delta_type="delta", bond_type="国债"):
         """将imp_days_minutes方法获得的数据以折线图的方式展现出来"""
         # 2×1的画板
-        fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex="all", )
+        fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex="all", )
         # 生成横坐标轴值
         dt0 = dtt.date(2016, 2, 15)
         times = trading_time(dt0)
@@ -409,14 +378,17 @@ class ImpFuture(object):
         pd_data1 = pd.DataFrame(list(zip(*data1)), index=index, columns=columns)
         pd_data2 = pd.DataFrame(list(zip(*data2)), index=index, columns=columns)
         # 开始作图
+        locator = FixedLocator([54 * d + 26 for d in range(day1 + day2 + 1)])  # 设定横坐标标签
+        minor_locator = FixedLocator([54 * d - 1 for d in range(day1 + day2 + 2)])  # 次坐标轴
         for ax, pd_data in zip(axes, [pd_data1, pd_data2]):
             labels = pd_data.columns
             for i in range(len(labels)):
                 ax.plot(pd_data.index, pd_data.iloc[:, i], label=labels[i])
+            ax.xaxis.set_major_locator(locator)
+            ax.xaxis.set_minor_locator(minor_locator)
+            ax.grid(axis="x", which="minor")
         # 设置最后一个子图的X轴形式
-        locator = FixedLocator([54 * d + 26 for d in range(day1 + day2 + 1)])  # 设定横坐标标签
         formatter = FixedFormatter(days)
-        ax.xaxis.set_major_locator(locator)
         ax.xaxis.set_major_formatter(formatter)
         # 图例
         ax.legend(loc="best")
@@ -432,7 +404,7 @@ def main():
     # res = imp_future.imp_days("国债", "TF")
     # imp_future.imp_minutes_plot(2, "mg_delta")
     # res = imp_future.imp_days_minutes(3, 1, "T")
-    imp_future.imp_days_minutes_plot(3, 3, 5, "T")
+    imp_future.imp_days_minutes_plot(3, 3, 7, "T", delta_type="mg_delta")
     # imp_sat = ImpSat(db, cur)
     # imp_sat.imp_and_trend()
     # res = imp_sat.imp_seq(list(range(-19, 16, 5)), list(range(6)))
